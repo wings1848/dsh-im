@@ -1,7 +1,7 @@
 # Telegram 工作区切换卡片与 `/ws` 命令合并方案
 
-状态：实施中（草稿）。基线：`27bd7a2`（2026-10-21，包版本 5.4.0 之后的上游 main）。
-实施分支：`feat/tg-workspace-card`。整理日期：2026-10-21。
+状态：**实施完成，待真实 Telegram 重启验收**。基线：`27bd7a2`（2026-10-21，上游 main）。
+实施分支：`feat/tg-workspace-picker`（首个提交 `f2408c0`）。整理/实施日期：2026-10-21～22。
 
 目标：把 Telegram 的 `/ws` 与 `/wsl` 合并成一条命令——不带参数时发一张**可点击的工作区切换卡片**，
 点按钮即切换、原地更新当前项；带参数时保持原来的直接切换。其他文本渠道在能力不足时**明确降级**为现有文字列表。
@@ -176,11 +176,14 @@
 
 ## 验证记录
 
+> 全部证据文件在 `/home/wings/Code_Project/_notes/`（本机工作日志，不进仓库）。
+
 | 项 | 结果 | 证据 |
 | --- | --- | --- |
-| 验红（实现前跑新测试） | 待填 | 待填 |
-| 变异验证（故意弄坏一处，证明测试会红） | 待填 | 待填 |
-| `npm run check` | 待填 | 待填 |
-| 干净环境（删 node_modules/lib 重装重跑） | 待填 | 待填 |
-| 宿主加载（隔离 DSH_HOME 启动真实 Host） | 待填 | 待填 |
-| 真实 Telegram | 待填 | 待填 |
+| 验红（实现前跑新测试） | ✅ | 新测试首次运行即红：`SyntaxError: The requested module '../../../src/channels/telegram/telegram-bridge.mjs' does not provide an export named 'TELEGRAM_WORKSPACE_CARD'`（13 个新用例全部无法执行） |
+| 变异验证（故意弄坏一处，证明测试会红） | ✅ 3/3 | 见 `_notes/mutation-evidence.log`：M1 去掉当前项 ✓ → `current workspace is marked / actual: '1. wings'`；M2 删掉双击守卫 → `only the first press switches / actual: 2`；M3 把 workspacelist 放回菜单 → 菜单深比较失败 |
+| `npm run check`（构建 + 4421 测试 + 打包校验） | ✅ | `_notes/check-2.log`：`ℹ tests 4421 / pass 4421 / fail 0`、`EXIT_0` |
+| GitHub Actions（Node 24 ubuntu + Windows 回归） | ✅ | fork PR #1 的验证分支 run `39627534098`：两个 job 全 success（`Test, build, and verify package`、`Workspace and QR regression tests (Windows)`） |
+| 干净环境（删 `node_modules`/`lib` 后 `npm ci && npm run check`） | ✅ | 在临时副本（无 `node_modules`/`lib`/`.git`）重装依赖后跑完整 check：`ℹ tests 4421 / pass 4421 / fail 0`、`EXIT_0`、`Verified dsh-im package artifacts.`（`_notes/clean-check.log`） |
+| 宿主加载（隔离 `DSH_HOME` 启动真实 dsh web） | ✅ | `_notes/host-e2e.sh`：把 profile 里的 `@xmanrui/dsh-im` 指向本地仓库后，`dsh web` 在 5011 端口正常启动（`HOST_E2E_OK`）；再给 `lib/index.js` 临时追加启动打点重跑，日志出现 `[dsh-im-local-marker] loaded from local working tree`，且无 boot error → 真实 Host 加载的确实是本地构建。打点已还原（`sha256` 与提交一致） |
+| 真实 Telegram 机器人收到卡片并可点击切换 | ⏳ 待用户重启后验收 | dsh web 的宿主代码只在进程启动时加载，不能热更。已把 profile 指向本地构建（见 `_notes/RESTART-TO-ACTIVATE.md`），`systemctl --user restart dsh-web.service` 后按 A1–A5 验收 |
