@@ -48,6 +48,24 @@
 
 `probe-telegram-limits.mjs` 的安全约束：token 只从 `TELEGRAM_PROBE_TOKEN` 读、只接受合法 bot token 形状、从不打印（输出里统一 `[redacted]`）；`TELEGRAM_PROBE_CHAT_ID` 必填；只操作探测 chat 里自己创建的临时消息并在 `finally` 里删除；不加 `--live` 时零网络请求。
 
+### 真机回填（2026-10-22，测试 bot `@dsh_e2e_22q4_bot`）
+
+`probe-telegram-limits.mjs --live` 实测（完整输出与截图见
+[Telegram交互体验真机验证记录.md](./Telegram交互体验真机验证记录.md)）：
+
+| 探测项 | 实测 |
+| --- | --- |
+| default / all_private_chats / all_group_chats 命令数 | **0 / 22 / 18**（合并 `/ws` 分支后；群聊不含 history,batch,send,cancel） |
+| callback_data 64B / 65B ASCII | 接受 / 400 `BUTTON_DATA_INVALID` |
+| callback_data 63B / 66B UTF-8（21/22 个汉字） | 接受 / 400 `BUTTON_DATA_INVALID` |
+| inline_keyboard 按钮数 8/20/40/60/100/200 | 全部接受（200 以内未触限） |
+| `editMessageText` 同时传 `reply_markup` | 接受（一次调用更新正文 + 键盘） |
+| 连续 30 次编辑 | 窗口内未触发 429（阈值未到，不代表无上限） |
+| `answerCallbackQuery` 时限 | 仍未实测（机器人无法合成按键） |
+
+> 注意：本文档断言基于批次 0 单分支，菜单为 **23 私聊 / 19 群聊**；与 `/ws` 分支合并后
+> `workspacelist` 隐藏，真机为 **22 / 18**（scope 语义与测试结构不变）。
+
 ## 2. 验收标准（闸门 2）与实测
 
 | # | 标准 | 判定命令 | 期望 | 实测 |

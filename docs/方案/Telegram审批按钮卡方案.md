@@ -33,7 +33,7 @@
 > `[真机待验证]` = 官方文档如此声明，但本任务禁止调用生产 Telegram bot，需 Lead 在 E2E 阶段真机复核。
 > 凡标 `[真机待验证]` 的断言**不要**在集成验收里当成已验证。
 
-### F1 `editMessageText` 支持 `reply_markup`（F5/路线图） `[官方文档][真机待验证]`
+### F1 `editMessageText` 支持 `reply_markup`（F5/路线图） `[官方文档][真机已验证]`
 
 ```bash
 curl -s https://core.telegram.org/bots/api > /tmp/tg-bot-api.html
@@ -52,9 +52,9 @@ PY
  'parse_mode', 'entities', 'link_preview_options', 'rich_message', 'reply_markup']
 ```
 
-结论：官方参数表为 `reply_markup | InlineKeyboardMarkup | Optional`，即一次调用可同改正文+键盘。**真机待验证**：官方文档支持，但本批次未对生产 bot 实测该组合；E2E 阶段点一次审批按钮即可确认。
+结论：官方参数表为 `reply_markup | InlineKeyboardMarkup | Optional`，即一次调用可同改正文+键盘。**真机已验证**（2026-10-22，测试 bot + Telegram Desktop 7.3.1）：点审批按钮后卡片的终态更新在一次调用里同时改正文与清键盘；`probe-telegram-limits.mjs --live` 也记录该组合被接受。证据见[真机验证记录](./Telegram交互体验真机验证记录.md) E6/E7/E10。
 
-### F2 `callback_data` 预算为 1-64 字节 `[官方文档][本地实测][真机待验证]`
+### F2 `callback_data` 预算为 1-64 字节 `[官方文档][本地实测][真机已验证]`
 
 ```bash
 python3 - <<'PY'
@@ -393,6 +393,8 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 ---
 
 ## 5. 验证证据（闸门 5）
+
+> 真机端到端证据见 [Telegram交互体验真机验证记录.md](./Telegram交互体验真机验证记录.md) E5–E7、E11。
 
 ### 5.1 验红（修复前失败）
 
