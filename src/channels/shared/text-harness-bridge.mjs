@@ -216,6 +216,9 @@ export class TextHarnessBridge {
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
   #approvalCard;
+  // Optional channel-supplied model/reasoning picker controller. Null (every
+  // channel but Telegram today) keeps the plain-text /models and /reasoninglist.
+  #modelCard;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -245,6 +248,7 @@ export class TextHarnessBridge {
     interactionCard = null,
     workspaceCard = null,
     approvalCard = null,
+    modelCard = null,
     approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
@@ -269,6 +273,7 @@ export class TextHarnessBridge {
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
     this.#approvalCard = approvalCard ?? null;
+    this.#modelCard = modelCard ?? null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
     // sender's own mid-turn follow-ups into the in-flight turn instead of
@@ -1010,6 +1015,13 @@ export class TextHarnessBridge {
           this.#approvals.closeRoute(key),
         ]);
       }
+      // A read-only model/reasoning command may carry a machine-readable
+      // snapshot: present it as a picker card when this channel has one. A
+      // refused or impossible card falls through to the unchanged text path.
+      if (result?.card && await this.#presentModelCard(target, result, key)) {
+        this.#status.lastError = null;
+        return;
+      }
       for (const reply of result?.messages ?? [result?.message]) {
         if (reply) await this.#bot.sendText(target, reply);
       }
@@ -1027,6 +1039,33 @@ export class TextHarnessBridge {
         messageFailureDiagnostic(error, failure),
       );
       await this.#bot.sendText(target, messageFailureText(failure)).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Present a read-only model/reasoning command result as a picker card.
+   * Returns false so the caller sends the unchanged text listing: a channel
+   * without keyboard support, an unrenderable snapshot or a refused card send
+   * must never lose the command output.
+   */
+  async #presentModelCard(target, result, key) {
+    if (!this.#modelCard || typeof this.#modelCard.present !== 'function') return false;
+    try {
+      return await this.#modelCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey: key,
+        kind: result.card,
+        modelCatalog: result.modelCatalog,
+        reasoningCatalog: result.reasoningCatalog,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present a model picker; `
+        + 'falling back to the text listing:',
+        error?.message ?? error,
+      );
+      return false;
     }
   }
 
@@ -1836,6 +1875,30 @@ export class TextHarnessBridge {
     // namespace before the question bookkeeping so a press can never touch it.
     const workspacePress = this.#workspaceCard?.parse?.(callback.data) ?? null;
     if (workspacePress) return this.#handleWorkspaceCardPress(callback, key, workspacePress);
+    // Model/reasoning pickers own their namespaces too. A press replays the
+    // typed command and repaints the picker in place; anything this picker did
+    // not produce returns false and keeps the old callback paths untouched.
+    if (this.#modelCard && typeof this.#modelCard.handlePress === 'function') {
+      const handled = await this.#modelCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        harness: this.#harness,
+        state: this.#state,
+        signal: this.#signal,
+        accessPolicy: this.#accessPolicy,
+        pendingInteraction: this.#pendingInteractions.has(key)
+          || this.#approvals.hasPending(key),
+        control: { owner: this, key },
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
     // Approval cards own their callback namespace; every other press keeps using
     // the question-card path below. The card acknowledges the press itself (the
     // ack must be the first round-trip), so this branch runs before any other
