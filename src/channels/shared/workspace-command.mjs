@@ -265,12 +265,20 @@ function formatSessionRelativeTime(value) {
  * byte-compatible `sessionListMessage` above.
  */
 function sessionListingSnapshot(workspace, sessions) {
+  // Archived sessions stay in the byte-compatible text list (with the
+  // 「已归档」 marker) but never become picker buttons: a picker exists to bind a
+  // live Session, and hiding retired rows keeps that list short and safe.
+  const bindable = sessions.filter((session) => session?.archived !== true);
   return {
     workspace,
-    sessions: sessions.map((session) => ({
+    // Cards never render archived rows; the count lets an adapter say "there are
+    // sessions, but all of them are archived" instead of falling back to the
+    // archived-bearing text list.
+    archivedCount: sessions.length - bindable.length,
+    sessions: bindable.map((session) => ({
       sessionId: safeDisplayText(session?.sessionId),
       title: safeDisplayText(session?.title),
-      archived: session?.archived === true,
+      archived: false,
       summaryAvailable: session?.summaryAvailable !== false,
     })),
   };

@@ -35,7 +35,8 @@
 | # | 标准 | 判定命令 | 期望输出 | 实测 |
 | --- | --- | --- | --- | --- |
 | A1 | 裸 `/sessionlist` 在 Telegram 发一张会话列表卡（不再发多屏文字） | `node --test test/channels/telegram/session-card.test.mjs`（用例 `sends one session card`） | 1 张卡、0 条文字；每会话一行按钮 | ✅ |
-| A2 | 每行按钮显示「标题 + 短 ID」，归档有标记，当前绑定行有 ✓ | 同上（用例 `title, short ID, current ✓ and archived markers`） | `✓ 会话 1 · 00000001` / `会话 2 · 00000002` / `会话 3 · 00000003（已归档）` | ✅ |
+| A2 | 每行按钮显示「标题 + 短 ID」，当前绑定行有 ✓；**已归档会话不出现**在卡片里 | 同上（用例 `title, short ID and current ✓`） | `✓ 会话 1 · 00000001` / `会话 2 · 00000002`（归档的第 3 行被隐藏） | ✅ |
+| A2b | 整个工作区都是归档会话时，不发可绑键盘，并明确说明已归档不显示 | 同上（用例 `a workspace whose sessions are all archived hides them and says why`） | 文字「当前工作区没有可绑定的会话（已归档的会话不显示）。」 | ✅ |
 | A3 | 每页 10 项；上一页/下一页翻转同一张卡；页码按钮为惰性 noop | 同上（`paginate ten per page`、`page indicator is an idempotent receipt`） | 第 2 页编辑同一 messageId、pager 文本 `['◀ 上一页','第 2/2 页']`；点页码 → toast「已经是第 1 页」且不绑定、不编辑 | ✅ |
 | A4 | 点会话按钮 → 绑定当前聊天，✓ 原地移到该行并给回执 | 同上（`binds it, moves ✓ in place and returns a receipt`） | `harness.bindWorkspaceSession(key, sessionId)` 1 次；`updateInteractionCard` 新键盘第 2 行带 ✓、第 1 行无 ✓；toast `已绑定会话：标题 …` | ✅ |
 | A5 | 卡片是命令面：无命令权限点击不绑定，走同一权限判定 | 同上（`a press without command permission binds nothing`） | 0 次绑定；toast 等于 `COMMAND_PERMISSION_DENIED_MESSAGE` | ✅ |
@@ -85,13 +86,17 @@
 
 | 输入 | 改造前（Telegram） | 改造后（Telegram） | 其他渠道 |
 | --- | --- | --- | --- |
-| `/sessionlist` / `/sessions` 裸命令 | 多屏文字列表 | **会话列表卡**（10/页，✓/归档标记，翻页） | 文字列表（不变） |
+| `/sessionlist` / `/sessions` 裸命令 | 多屏文字列表 | **会话列表卡**（10/页，当前绑定 ✓，已归档会话不显示，翻页） | 文字列表（不变，仍带「已归档」标记） |
 | `/sessionlist 序号`、`绝对路径`、`--limit N` | 文字列表 | 文字列表（不变；卡片只服务裸命令） | 不变 |
 | 裸 `/session` | 用法文字 | **同一张会话列表卡** | 用法文字（不变） |
 | `/session <ID>`、`/session N` | 绑定 + 文字回执 | 不变（文字回执） | 不变 |
 | 无卡/发送失败/列表 >20 | — | 逐字回退上面的文字输出 | 本来就是文字 |
 
 ### 数据流
+
+> 卡片专用快照（`sessionListingSnapshot`）会过滤 `archived: true` 的会话，并带
+> `archivedCount`；适配器据此把「全部已归档」渲染成明确提示而**不是**回退到含归档行的文字列表。
+> 文字列表 `sessionListMessage` 保持字节级不变（仍显示「已归档」标记），这是有意保留的降级路径。
 
 ```text
 用户输入 /sessionlist（或 Telegram 裸 /session）

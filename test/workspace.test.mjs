@@ -2476,16 +2476,13 @@ test('/sessionlist exposes a picker snapshot only for the bare listing', async (
   };
 
   const bare = await runWorkspaceCommand('/sessionlist', harness, 'direct:one');
+  // The picker snapshot hides archived Sessions (the text half below keeps them
+  // with the 「已归档」 marker), so the card never offers a retired row as a bind target.
   assert.deepEqual(bare.sessionListing, {
     workspace: defaultWorkspace,
+    archivedCount: 1,
     sessions: [
       { sessionId: 'session-alpha', title: 'Alpha', archived: false, summaryAvailable: true },
-      {
-        sessionId: 'session-beta',
-        title: 'Beta injected',
-        archived: true,
-        summaryAvailable: false,
-      },
     ],
   });
   // The text half is untouched: the picker is additive, never a replacement.

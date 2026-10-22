@@ -87,6 +87,8 @@ export default {
   '已绑定会话：{title}': 'Bound to Session: {title}',
   '这个会话列表已过期，请重新发送 /sessionlist 或 /session。':
     'This session list has expired. Send /sessionlist or /session again.',
+  '当前工作区没有可绑定的会话（已归档的会话不显示）。':
+    'No bindable sessions in this workspace (archived sessions are hidden).',
   '这个会话列表已处理，请重新发送 /sessionlist。':
     'This session list was already handled. Send /sessionlist again.',
   '这个会话列表已被更新的列表取代，请使用最新一条。':

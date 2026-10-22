@@ -54,6 +54,8 @@ const PAGE_ALREADY_TEXT = '已经是第 {page} 页。';
 const ALREADY_BOUND_TEXT = '当前聊天已经绑定该会话。';
 const BOUND_RECEIPT_TEXT = '已绑定会话：{title}';
 const BIND_FALLBACK_TEXT = '暂时无法绑定会话，请稍后重试。';
+/** Every session in the workspace is archived: say so instead of listing them. */
+const NO_BINDABLE_SESSIONS_TEXT = '当前工作区没有可绑定的会话（已归档的会话不显示）。';
 
 /**
  * Per-state notices; the wording names this card instead of the shared generic
@@ -150,16 +152,28 @@ function sessionSnapshot(listing) {
   if (!workspace) return null;
   if (!Array.isArray(listing.sessions)) return null;
   const sessions = [];
+  let archivedCount = 0;
   for (const session of listing.sessions) {
     if (!validSessionId(session?.sessionId)) return null;
+    // Archived sessions never render as bind buttons; the text path still shows
+    // them with the 「已归档」 marker when a card is impossible or refused.
+    if (session?.archived === true) {
+      archivedCount += 1;
+      continue;
+    }
     sessions.push({
       sessionId: session.sessionId,
       title: safeDisplayText(session?.title),
-      archived: session?.archived === true,
+      archived: false,
       summaryAvailable: session?.summaryAvailable !== false,
     });
   }
-  return { workspace, sessions };
+  // The shared snapshot already withholds archived rows and reports how many it
+  // hid; add any archived rows a caller passed raw (defensive, same contract).
+  const hiddenArchived = Number.isSafeInteger(listing.archivedCount) && listing.archivedCount > 0
+    ? listing.archivedCount
+    : 0;
+  return { workspace, sessions, archivedCount: archivedCount + hiddenArchived };
 }
 
 /**
@@ -280,6 +294,18 @@ export class TelegramSessionCard {
     if (typeof conversationKey !== 'string' || !conversationKey) return false;
     const snapshot = sessionSnapshot(listing);
     if (!snapshot) return false;
+    if (snapshot.sessions.length === 0) {
+      // No bindable rows. When the workspace truly has no sessions the caller's
+      // legacy empty-list text stays authoritative (return false). When rows were
+      // hidden because they are all archived, answer directly so the fallback text
+      // never exposes the archived entries the picker is supposed to hide.
+      if (snapshot.archivedCount === 0) return false;
+      if (typeof bot.sendText === 'function') {
+        await bot.sendText(target, t(NO_BINDABLE_SESSIONS_TEXT));
+        return true;
+      }
+      return false;
+    }
     const current = typeof currentSessionId === 'string' && currentSessionId
       ? currentSessionId
       : null;

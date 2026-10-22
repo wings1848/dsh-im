@@ -175,7 +175,7 @@ async function press(bridge, data, overrides = {}) {
   await tick();
 }
 
-test('/sessionlist sends one session card with title, short ID, current ✓ and archived markers', async () => {
+test('/sessionlist sends one session card with title, short ID and current ✓', async () => {
   const sessions = sessionsFixture(3, { archivedIndexes: [2] });
   const { bridge, cards, sent } = bridgeFixture({
     sessions,
@@ -186,13 +186,23 @@ test('/sessionlist sends one session card with title, short ID, current ✓ and 
   assert.equal(cards.length, 1, 'exactly one card');
   assert.equal(sent.length, 0, 'no duplicate text list');
   assert.match(cards[0].text, new RegExp(`工作区：${WORKSPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  assert.match(cards[0].text, /会话（3）/);
+  assert.match(cards[0].text, /会话（2）/);
   assert.match(cards[0].text, /点击按钮把会话绑定到当前聊天/);
   const rows = cards[0].markup.inline_keyboard;
-  assert.equal(rows.length, 3, 'one row per session');
+  assert.equal(rows.length, 2, 'archived sessions never become buttons');
   assert.equal(rows[0][0].text, '✓ 会话 1 · 00000001');
   assert.equal(rows[1][0].text, '会话 2 · 00000002');
-  assert.equal(rows[2][0].text, '会话 3 · 00000003（已归档）');
+  assert.doesNotMatch(JSON.stringify(cards[0]), /已归档/);
+});
+
+test('a workspace whose sessions are all archived hides them and says why', async () => {
+  const sessions = sessionsFixture(2, { archivedIndexes: [0, 1] });
+  const { bridge, cards, sent } = bridgeFixture({ sessions });
+  await bridge.accept(message('/sessionlist'));
+
+  assert.equal(cards.length, 0, 'no keyboard that could bind an archived Session');
+  assert.match(sent.join(''), /当前工作区没有可绑定的会话（已归档的会话不显示）/);
+  assert.doesNotMatch(sent.join(''), /（已归档）|ID: /, 'the archived rows are not leaked in the notice');
 });
 
 test('long lists paginate ten per page and page presses edit the same card in place', async () => {
