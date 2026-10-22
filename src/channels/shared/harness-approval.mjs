@@ -72,6 +72,7 @@ export function harnessApprovalText(payload, {
   toolCall,
   requiresMention = false,
   maxArgumentsLength = 6_000,
+  hasButtons = false,
 } = {}) {
   if (!validHarnessApproval(payload)) return null;
   const callId = cleanText(payload.callId);
@@ -90,8 +91,13 @@ export function harnessApprovalText(payload, {
   ];
   const reason = printableText(payload.reason);
   if (reason) lines.push(t('原因：{reason}', { reason }));
-  lines.push('', t(APPROVAL_PROMPT));
-  if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  // A button card carries the intent itself: asking the user to type a decision
+  // (or to @ the bot in a group) would be misleading next to the buttons. The
+  // plain-text path below stays byte-identical to what it has always sent.
+  if (!hasButtons) {
+    lines.push('', t(APPROVAL_PROMPT));
+    if (requiresMention) lines.push('', t('群聊中请 @机器人 后发送审批决定。'));
+  }
   return lines.join('\n');
 }
 
@@ -611,7 +617,7 @@ export class HarnessApprovalQueue {
     pending.resolutionNotified = true;
     const text = approvalOutcomeText(outcome);
     try {
-      await pending.onResolved?.(text);
+      await pending.onResolved?.(text, outcome);
     } catch (error) {
       this.#logger.warn?.(`[dsh-im:${this.#label}] failed to update a resolved approval:`, error);
     }
