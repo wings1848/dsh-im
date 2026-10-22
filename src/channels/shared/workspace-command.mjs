@@ -258,6 +258,24 @@ function formatSessionRelativeTime(value) {
   return t('{year}年{month}月{day}日', { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate() });
 }
 
+/**
+ * The machine-readable half of one session list, for channels that render the
+ * listing as a picker. It carries only what a button needs (title, short id
+ * source, archived/summary flags), never the display text — that stays the
+ * byte-compatible `sessionListMessage` above.
+ */
+function sessionListingSnapshot(workspace, sessions) {
+  return {
+    workspace,
+    sessions: sessions.map((session) => ({
+      sessionId: safeDisplayText(session?.sessionId),
+      title: safeDisplayText(session?.title),
+      archived: session?.archived === true,
+      summaryAvailable: session?.summaryAvailable !== false,
+    })),
+  };
+}
+
 function sessionListMessage(workspace, sessions, { currentWorkspace = false } = {}) {
   const rows = sessions.map((session) => {
     const sessionId = safeDisplayText(session?.sessionId);
@@ -315,7 +333,12 @@ async function runSessionListCommand(match, harness, conversationKey) {
     const message = sessionListMessage(workspace, sessions, {
       currentWorkspace: workspace === currentWorkspace,
     });
-    return commandResult(message, splitWorkspaceCommandMessage(message));
+    // Only the bare list exposes a picker snapshot. A selector or --limit is a
+    // one-off textual question, so its text reply stays the whole answer.
+    const picker = request.selector === '' && request.limit === null
+      ? { sessionListing: sessionListingSnapshot(workspace, sessions) }
+      : {};
+    return commandResult(message, splitWorkspaceCommandMessage(message), picker);
   } catch (error) {
     if (error?.code === 'workspace-bot-not-found') {
       return commandResult(t('机器人正在移除或已重新接入，无法列出原会话的工作区会话。'));
@@ -324,7 +347,12 @@ async function runSessionListCommand(match, harness, conversationKey) {
   }
 }
 
-function sessionBindErrorMessage(error) {
+/**
+ * One failure mapping for every session-binding surface. The typed command and
+ * the Telegram picker card call the same adoption path, so their failures must
+ * not drift; exported for the card adapter and its tests.
+ */
+export function sessionBindErrorMessage(error) {
   if (error?.code === 'session-id-invalid') {
     return t(`Session ID 格式无效。
 {usage}`, { usage: t(SESSION_BIND_USAGE) });
@@ -411,7 +439,16 @@ async function runSessionBindCommand(command, harness, conversationKey) {
       t('归档：{archived}', { archived: bound?.archived === true ? t('是') : t('否') }),
       t('发送 /history 查看最近对话。'),
     ].join('\n');
-    return commandResult(message, splitWorkspaceCommandMessage(message));
+    // The same receipt in machine-readable form, so a picker card can re-mark
+    // the bound row and word its toast without parsing the text receipt.
+    return commandResult(message, splitWorkspaceCommandMessage(message), {
+      bound: {
+        workspace,
+        sessionId: boundSessionId,
+        title: safeDisplayText(bound?.title),
+        archived: bound?.archived === true,
+      },
+    });
   } catch (error) {
     return commandResult(sessionBindErrorMessage(error));
   }

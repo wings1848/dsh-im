@@ -2456,3 +2456,55 @@ test('workspace prompt preparation receives the resolved session and repeats aft
   ]);
   assert.equal(result.sessionId, 'new-session');
 });
+
+test('/sessionlist exposes a picker snapshot only for the bare listing', async (t) => {
+  const { defaultWorkspace } = await fixture(t);
+  const sessions = [
+    { sessionId: 'session-alpha', title: 'Alpha', archived: false, summaryAvailable: true },
+    {
+      sessionId: 'session-beta',
+      title: 'Beta\u202e\ninjected',
+      archived: true,
+      summaryAvailable: false,
+    },
+  ];
+  const harness = {
+    currentWorkspace() { return defaultWorkspace; },
+    async listWorkspaceSessions(workspace) {
+      return { workspace, sessions: workspace === defaultWorkspace ? sessions : [] };
+    },
+  };
+
+  const bare = await runWorkspaceCommand('/sessionlist', harness, 'direct:one');
+  assert.deepEqual(bare.sessionListing, {
+    workspace: defaultWorkspace,
+    sessions: [
+      { sessionId: 'session-alpha', title: 'Alpha', archived: false, summaryAvailable: true },
+      {
+        sessionId: 'session-beta',
+        title: 'Beta injected',
+        archived: true,
+        summaryAvailable: false,
+      },
+    ],
+  });
+  // The text half is untouched: the picker is additive, never a replacement.
+  assert.match(bare.message, /会话（2）：/);
+  assert.match(bare.message, /2\. 标题暂不可用（已归档）/);
+  assert.equal(bare.messages.join(''), bare.message);
+
+  // A selector or a one-off --limit is a textual question, not a picker.
+  assert.equal(
+    (await runWorkspaceCommand('/sessionlist 2', harness)).sessionListing,
+    undefined,
+  );
+  assert.equal(
+    (await runWorkspaceCommand('/sessionlist --limit 1', harness)).sessionListing,
+    undefined,
+  );
+  // Bare /session keeps its historical usage reply on the shared command layer;
+  // only a channel with a picker adapter opens the listing instead.
+  const bind = await runWorkspaceCommand('/session', harness, 'direct:one');
+  assert.match(bind.message, /用法：\/session Session ID/);
+  assert.equal(bind.sessionListing, undefined);
+});
