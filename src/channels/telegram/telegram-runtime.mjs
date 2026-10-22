@@ -29,11 +29,22 @@ function commandMenuEntries(catalog, translate) {
       .map((entry) => ({
         command: entry.name,
         description: translate(entry.description ?? item.description),
+        // A private-only command's aliases are private-only too, so the group
+        // scope never advertises a command it cannot run there.
+        privateOnly: (entry.privateOnly ?? item.privateOnly) === true,
       })));
 }
 
+function publicMenuCommands(entries) {
+  return entries.map(({ command, description }) => ({ command, description }));
+}
+
+/**
+ * Flat, scope-agnostic menu (direct-chat superset) used by help/tests and kept
+ * as a stable public shape. Runtime registration uses the scoped lists below.
+ */
 export function telegramCommandMenu(catalog = SHARED_COMMAND_CATALOG) {
-  const commands = commandMenuEntries(catalog, t);
+  const commands = publicMenuCommands(commandMenuEntries(catalog, t));
   validateTelegramCommands(commands, { allowEmpty: true });
   return commands;
 }
@@ -41,8 +52,44 @@ export function telegramCommandMenu(catalog = SHARED_COMMAND_CATALOG) {
 // Retain the source-language export for existing consumers, derived from the
 // catalog. Runtime synchronization always generates a fresh, localized list.
 export const TELEGRAM_COMMAND_MENU = Object.freeze(
-  commandMenuEntries(SHARED_COMMAND_CATALOG, (text) => text).map((item) => Object.freeze(item)),
+  publicMenuCommands(commandMenuEntries(SHARED_COMMAND_CATALOG, (text) => text))
+    .map((item) => Object.freeze(item)),
 );
+
+/**
+ * Telegram resolves the commands shown in a chat from the most specific scope
+ * that applies: a chat scope, then AllPrivateChats / AllGroupChats, then the
+ * default scope. Both lists are registered without a language code, so one
+ * menu covers every client language (the labels follow the host language).
+ */
+export const TELEGRAM_COMMAND_MENU_SCOPES = Object.freeze({
+  private: Object.freeze({ type: 'all_private_chats' }),
+  group: Object.freeze({ type: 'all_group_chats' }),
+});
+
+/**
+ * The two menus the runtime publishes. Private chats receive every command;
+ * groups drop commands whose handlers only accept direct chats (history,
+ * batch, send, cancel). Hiding a command from a menu never changes the
+ * handler's own permission checks.
+ */
+export function telegramCommandMenuScopes(catalog = SHARED_COMMAND_CATALOG) {
+  const entries = commandMenuEntries(catalog, t);
+  const privateCommands = publicMenuCommands(entries);
+  const groupCommands = publicMenuCommands(entries.filter((entry) => !entry.privateOnly));
+  validateTelegramCommands(privateCommands, { allowEmpty: true });
+  validateTelegramCommands(groupCommands, { allowEmpty: true });
+  return Object.freeze([
+    Object.freeze({
+      scope: TELEGRAM_COMMAND_MENU_SCOPES.private,
+      commands: Object.freeze(privateCommands),
+    }),
+    Object.freeze({
+      scope: TELEGRAM_COMMAND_MENU_SCOPES.group,
+      commands: Object.freeze(groupCommands),
+    }),
+  ]);
+}
 
 function mentionedUsername(message, username) {
   if (!username) return false;
@@ -1342,12 +1389,19 @@ export class TelegramRuntime {
     }
   }
 
-  // Both operations use the existing default scope and language. Sending the
-  // full list replaces old entries; an empty catalog clears that list.
+  // Commands are registered per BotCommandScope, and the scopes overlap: a
+  // default-scope list from an earlier version would keep applying wherever a
+  // scoped list is missing and could advertise private-only commands in groups.
+  // Every sync therefore clears the default scope first, then replaces both the
+  // private and the group lists (deleting a scope when its catalog is empty).
+  // No language code is sent, so one list covers all client languages.
   async #sendCommandMenu(api, signal) {
-    const commands = telegramCommandMenu(this.#commandCatalog);
-    if (commands.length > 0) await api.setMyCommands({ commands, signal });
-    else await api.deleteMyCommands({ signal });
+    const menus = telegramCommandMenuScopes(this.#commandCatalog);
+    await api.deleteMyCommands({ signal });
+    for (const { scope, commands } of menus) {
+      if (commands.length > 0) await api.setMyCommands({ commands, scope, signal });
+      else await api.deleteMyCommands({ scope, signal });
+    }
   }
 
   /**
