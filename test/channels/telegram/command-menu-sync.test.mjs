@@ -8,10 +8,16 @@ import { SHARED_COMMAND_CATALOG } from '../../../src/channels/shared/command-cat
 import { getImHostLanguage, setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { TelegramConfigStore } from '../../../src/channels/telegram/config-store.mjs';
 import { TelegramController } from '../../../src/channels/telegram/telegram-controller.mjs';
-import { TelegramRuntime, telegramCommandMenu } from '../../../src/channels/telegram/telegram-runtime.mjs';
+import {
+  TelegramRuntime,
+  telegramCommandMenu,
+  telegramCommandMenuScopes,
+} from '../../../src/channels/telegram/telegram-runtime.mjs';
 
 const TOKEN = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456';
 const CONFIG = { botId: 'telegram_menu_sync', platformId: '123456789', username: 'HarnessBot' };
+const PRIVATE_SCOPE = { type: 'all_private_chats' };
+const GROUP_SCOPE = { type: 'all_group_chats' };
 
 function memoryState() {
   let cursor = null;
@@ -88,8 +94,13 @@ function runtimeFor(t, apiServer, options = {}) {
 
 const menuCalls = (apiServer) => apiServer.calls.filter(({ method }) =>
   ['setMyCommands', 'deleteMyCommands'].includes(method));
+const setCommands = (apiServer) => apiServer.calls.filter(({ method }) => method === 'setMyCommands');
+const bodyFor = (scope, catalog) => {
+  const menu = telegramCommandMenuScopes(catalog).find((item) => item.scope.type === scope);
+  return { commands: menu.commands, scope: { type: scope } };
+};
 
-test('runtime sends the complete localized production catalog before menu button and polling', async (t) => {
+test('runtime clears the legacy default scope, then registers private and group menus', async (t) => {
   const previous = getImHostLanguage();
   t.after(() => setImHostLanguage(previous));
   setImHostLanguage('en');
@@ -97,56 +108,89 @@ test('runtime sends the complete localized production catalog before menu button
   const runtime = runtimeFor(t, apiServer);
   await runtime.start();
   assert.equal(runtime.status.ready, true);
-  assert.deepEqual(apiServer.calls.slice(0, 6).map(({ method }) => method), [
-    'getMe', 'getWebhookInfo', 'setMyCommands', 'setChatMenuButton', 'getUpdates', 'getUpdates',
+  assert.deepEqual(apiServer.calls.slice(0, 8).map(({ method }) => method), [
+    'getMe', 'getWebhookInfo', 'deleteMyCommands', 'setMyCommands', 'setMyCommands',
+    'setChatMenuButton', 'getUpdates', 'getUpdates',
   ]);
-  const commands = menuCalls(apiServer)[0].body.commands;
-  assert.deepEqual(commands, telegramCommandMenu());
-  assert.equal(commands.length, telegramCommandMenu().length);
-  assert.equal(commands.find((item) => item.command === 'history').description,
-    'Show recent history (private chats only)');
-  for (const command of ['history', 'reasoninglist', 'reasonings', 'reasoning']) {
-    assert.ok(commands.some((item) => item.command === command));
+
+  const menus = menuCalls(apiServer);
+  assert.equal(menus.length, 3);
+  // Telegram keeps commands per scope; a leftover default-scope list from an
+  // older version would merge into chats that match no scoped list.
+  assert.deepEqual(menus[0], { method: 'deleteMyCommands', body: {} });
+  assert.deepEqual(menus[1].body, bodyFor('all_private_chats'));
+  assert.deepEqual(menus[2].body, bodyFor('all_group_chats'));
+
+  const privateNames = menus[1].body.commands.map((item) => item.command);
+  const groupNames = menus[2].body.commands.map((item) => item.command);
+  for (const name of ['history', 'batch', 'send', 'cancel']) {
+    assert.ok(privateNames.includes(name), `${name} belongs in the private menu`);
+    assert.ok(!groupNames.includes(name), `${name} must not appear in the group menu`);
   }
-  assert.deepEqual(apiServer.calls[3].body, { menu_button: { type: 'commands' } });
+  for (const alias of ['ws', 'conversation', 'thread', 'workspaces', 'wsl',
+    'sessions', 'reasonings', 'presets']) {
+    assert.ok(!privateNames.includes(alias), `${alias} must stay hidden`);
+    assert.ok(!groupNames.includes(alias), `${alias} must stay hidden`);
+  }
+  assert.equal(menus[1].body.commands.find((item) => item.command === 'history').description,
+    'Show recent history (private chats only)');
+  assert.deepEqual(apiServer.calls[5].body, { menu_button: { type: 'commands' } });
+
   await runtime.start();
-  assert.equal(menuCalls(apiServer).length, 1, 'start is idempotent while connected');
+  assert.equal(menuCalls(apiServer).length, 3, 'start is idempotent while connected');
   await runtime.stop();
   setImHostLanguage('zh');
   await runtime.start();
-  assert.deepEqual(menuCalls(apiServer)[1].body, { commands: telegramCommandMenu() });
+  const afterRestart = menuCalls(apiServer).slice(3);
+  assert.deepEqual(afterRestart.map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+  assert.deepEqual(afterRestart[1].body, bodyFor('all_private_chats'));
+  assert.equal(afterRestart[1].body.commands.find((item) => item.command === 'history').description,
+    '查看最近历史消息（仅私聊）');
 });
 
-test('a live interface language switch re-sends the command menu without a reconnect', async (t) => {
+test('a live interface language switch re-sends both scoped menus without a reconnect', async (t) => {
   const previous = getImHostLanguage();
   t.after(() => setImHostLanguage(previous));
   setImHostLanguage('zh');
   const apiServer = server();
   const runtime = runtimeFor(t, apiServer);
   await runtime.start();
-  assert.equal(menuCalls(apiServer).length, 1);
-  assert.equal(menuCalls(apiServer)[0].body.commands.find((item) => item.command === 'history').description,
+  assert.equal(menuCalls(apiServer).length, 3);
+  assert.equal(setCommands(apiServer)[0].body.commands.find((item) => item.command === 'history').description,
     '查看最近历史消息（仅私聊）');
 
   setImHostLanguage('en');
   assert.equal(await runtime.refreshCommandMenu(), true);
-  assert.equal(menuCalls(apiServer).length, 2);
-  const refreshed = menuCalls(apiServer)[1].body.commands;
-  assert.deepEqual(refreshed, telegramCommandMenu());
-  assert.equal(refreshed.find((item) => item.command === 'history').description,
-    'Show recent history (private chats only)');
+  const refreshed = menuCalls(apiServer).slice(3);
+  assert.deepEqual(refreshed.map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+  assert.deepEqual(refreshed[1].body, bodyFor('all_private_chats'));
+  assert.deepEqual(refreshed[2].body, bodyFor('all_group_chats'));
+  assert.equal(setCommands(apiServer).at(-2).body.commands
+    .find((item) => item.command === 'history').description, 'Show recent history (private chats only)');
   // The menu button belongs to connect; a language refresh only replaces text.
   assert.equal(apiServer.calls.filter(({ method }) => method === 'setChatMenuButton').length, 1);
   assert.equal(runtime.status.ready, true);
 
-  // An empty catalog clears the list on refresh exactly as it does on connect.
+  // An empty catalog clears the default and both scoped lists on refresh.
   const emptyServer = server();
   const emptyRuntime = runtimeFor(t, emptyServer, { commandCatalog: [] });
   await emptyRuntime.start();
   setImHostLanguage('zh');
   assert.equal(await emptyRuntime.refreshCommandMenu(), true);
-  assert.deepEqual(menuCalls(emptyServer).map(({ method }) => method),
-    ['deleteMyCommands', 'deleteMyCommands']);
+  assert.deepEqual(menuCalls(emptyServer).map(({ method }) => method), [
+    'deleteMyCommands', 'deleteMyCommands', 'deleteMyCommands',
+    'deleteMyCommands', 'deleteMyCommands', 'deleteMyCommands',
+  ]);
+  assert.deepEqual(menuCalls(emptyServer).map(({ body }) => body), [
+    {},
+    { scope: { type: 'all_private_chats' } },
+    { scope: { type: 'all_group_chats' } },
+    {},
+    { scope: { type: 'all_private_chats' } },
+    { scope: { type: 'all_group_chats' } },
+  ]);
 });
 
 test('a language switch during connection is reconciled once the bot is ready', async (t) => {
@@ -157,7 +201,7 @@ test('a language switch during connection is reconciled once the bot is ready', 
   const apiServer = server({ gates: { setMyCommands: gate.promise } });
   const runtime = runtimeFor(t, apiServer);
 
-  // Start in Chinese. The initial setMyCommands is held open.
+  // Start in Chinese. The first scoped setMyCommands is held open.
   const starting = runtime.start();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(runtime.status.ready, false, 'startup must still be connecting');
@@ -166,7 +210,6 @@ test('a language switch during connection is reconciled once the bot is ready', 
   // returns false -- but it must not be dropped.
   setImHostLanguage('en');
   assert.equal(await runtime.refreshCommandMenu(), false);
-
   // A second switch before the catch-up must win; only the latest counts.
   setImHostLanguage('zh');
   assert.equal(await runtime.refreshCommandMenu(), false);
@@ -177,13 +220,15 @@ test('a language switch during connection is reconciled once the bot is ready', 
   assert.equal(runtime.status.ready, true);
 
   const menus = menuCalls(apiServer);
-  assert.equal(menus.length, 2, 'the initial menu plus one catch-up re-send');
-  const initial = menus[0].body.commands;
-  const caughtUp = menus[1].body.commands;
-  assert.equal(initial.find((item) => item.command === 'help').description, '显示帮助',
+  assert.equal(menus.length, 6, 'the initial sync plus one catch-up re-send');
+  assert.deepEqual(menus.slice(0, 3).map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+  assert.deepEqual(menus.slice(3).map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+  assert.equal(menus[1].body.commands.find((item) => item.command === 'help').description, '显示帮助',
     'the initial menu was sent in the language in force when it started');
-  assert.deepEqual(caughtUp, telegramCommandMenu());
-  assert.equal(caughtUp.find((item) => item.command === 'help').description, '显示帮助',
+  assert.deepEqual(menus[4].body, bodyFor('all_private_chats'));
+  assert.equal(menus[4].body.commands.find((item) => item.command === 'help').description, '显示帮助',
     'the catch-up must end on the latest language, not the one current at the first send');
 });
 
@@ -195,7 +240,7 @@ test('refreshing the menu of a bot that is not connected changes nothing', async
   await runtime.start();
   await runtime.stop();
   assert.equal(await runtime.refreshCommandMenu(), false, 'already stopped');
-  assert.equal(menuCalls(apiServer).length, 1);
+  assert.equal(menuCalls(apiServer).length, 3);
 });
 
 test('a failed menu refresh warns, reports failure and leaves the bot connected', async (t) => {
@@ -214,11 +259,17 @@ test('a failed menu refresh warns, reports failure and leaves the bot connected'
   assert.equal(runtime.status.ready, true);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0][0], /command menu refresh failed/);
+  assert.deepEqual(menuCalls(apiServer).slice(3).map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands'],
+    'a failing scope stops the remaining scopes instead of switching to text');
 
   // A later healthy refresh still succeeds; the failure is not sticky.
   apiServer.faults.failMethod = undefined;
   assert.equal(await runtime.refreshCommandMenu(), true);
-  assert.deepEqual(menuCalls(apiServer).at(-1).body, { commands: telegramCommandMenu() });
+  const recovered = menuCalls(apiServer).slice(5);
+  assert.deepEqual(recovered.map(({ method }) => method),
+    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+  assert.deepEqual(recovered[1].body, bodyFor('all_private_chats'));
 });
 
 test('the controller fans a language refresh out to every bot and contains one failure', async (t) => {
@@ -310,21 +361,33 @@ test('controller reconnect rebuilds runtime and replaces removed, hidden and emp
   });
   await controller.bindCredentials({ token: TOKEN });
   const botId = configStore.list()[0].botId;
-  assert.deepEqual(menuCalls(apiServer)[0].body.commands.slice(-2), [
+  assert.deepEqual(setCommands(apiServer)[0].body.commands.slice(-2), [
     { command: 'fixture', description: 'Fixture command' },
     { command: 'fixture_alias', description: 'Fixture command' },
   ]);
+  const scopedPrivate = () => setCommands(apiServer).filter(({ body }) =>
+    body.scope?.type === 'all_private_chats');
+  const scopedGroup = () => setCommands(apiServer).filter(({ body }) =>
+    body.scope?.type === 'all_group_chats');
+  assert.equal(scopedPrivate().length, 1);
+  assert.equal(scopedGroup().length, 1);
+
   catalog = catalog.filter((item) => item.name !== 'history');
   await controller.reconnectBot(botId);
-  assert.deepEqual(menuCalls(apiServer)[1].body, { commands: telegramCommandMenu(catalog) });
-  assert.ok(!menuCalls(apiServer)[1].body.commands.some((item) => item.command === 'history'));
+  assert.deepEqual(scopedPrivate().at(-1).body, bodyFor('all_private_chats', catalog));
+  assert.ok(!scopedPrivate().at(-1).body.commands.some((item) => item.command === 'history'));
+
   catalog = catalog.map((item) => item.name === 'fixture' ? { ...item, menuVisible: false } : item);
   await controller.reconnectBot(botId);
-  assert.deepEqual(menuCalls(apiServer)[2].body, { commands: telegramCommandMenu(catalog) });
-  assert.ok(!menuCalls(apiServer)[2].body.commands.some((item) => item.command.startsWith('fixture')));
+  assert.deepEqual(scopedPrivate().at(-1).body, bodyFor('all_private_chats', catalog));
+  assert.ok(!scopedPrivate().at(-1).body.commands.some((item) => item.command.startsWith('fixture')));
+
+  const beforeEmpty = menuCalls(apiServer).length;
   catalog = [];
   await controller.reconnectBot(botId);
-  assert.deepEqual(menuCalls(apiServer)[3], { method: 'deleteMyCommands', body: {} });
+  assert.deepEqual(menuCalls(apiServer).slice(beforeEmpty).map(({ method }) => method), [
+    'deleteMyCommands', 'deleteMyCommands', 'deleteMyCommands',
+  ]);
   assert.equal(runtimes.length, 4);
   assert.ok(runtimes.slice(0, -1).every((runtime) => runtime.status.ready === false));
   assert.equal(runtimes.at(-1).status.ready, true);
