@@ -9,8 +9,10 @@ import {
   telegramCommandMenuScopes,
 } from '../../../src/channels/telegram/telegram-runtime.mjs';
 
+// Integrated catalog: /workspace owns listing+switching and grows the picker,
+// so the separate /workspacelist entry stays hidden from the native menu.
 const MAIN_MENU_NAMES = [
-  'new', 'compact', 'clear', 'history', 'workspace', 'conv', 'workspacelist',
+  'new', 'compact', 'clear', 'history', 'workspace', 'conv',
   'sessionlist', 'session', 'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
   'status', 'version', 'help',
