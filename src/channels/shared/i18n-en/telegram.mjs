@@ -27,13 +27,10 @@ export default {
   // Approval button card (batch 1): buttons, terminal receipts and dead-card
   // notices. Keys match the literals passed through t() in approval-card.mjs.
   '✅ 批准一次': '✅ Approve once',
-  '❌ 拒绝': '❌ Reject',
   '✅ 已批准（仅本次）': '✅ Approved (this time only)',
   '❌ 已拒绝': '❌ Rejected',
   '⏰ 已过期': '⏰ Expired',
   '⛔ 已失效': '⛔ No longer valid',
-  '只有发起当前任务的用户可以处理这条审批。':
-    'Only the user who started this task can handle this approval.',
   '正在提交审批决定，请稍候。': 'Submitting the approval decision, please wait.',
   '该审批已处理，无需重复操作。': 'This approval was already handled. No need to act again.',
   '该审批已过期，已自动拒绝。': 'This approval expired and was rejected automatically.',
@@ -41,6 +38,4 @@ export default {
     'This approval was superseded by a newer prompt; use the latest one.',
   '该审批已失效，请等待新的审批提示。':
     'This approval is no longer valid; wait for a new approval prompt.',
-  '该审批已处理或不存在，无需重复操作。':
-    'This approval was already handled or does not exist. No need to act again.',
 };

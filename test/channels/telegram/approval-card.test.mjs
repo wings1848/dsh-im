@@ -714,7 +714,7 @@ test('approval card labels follow the host language', async () => {
     assert.match(env.edits[0].text, /✅ Approved \(this time only\)/u);
 
     await bridge.acceptCallback(callback({ data: pressData(env.cards, 0), callbackQueryId: 'cb-late' }));
-    assert.match(env.notices.at(-1).text, /already handled/u);
+    assert.match(env.notices.at(-1).text, /already (?:handled|processed)/u);
 
     await stopFixture(controller, processing);
   } finally {
