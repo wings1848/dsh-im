@@ -1,7 +1,11 @@
 # Telegram 命令与交互体验优化路线图
 
-状态：**方案（未实施，待拍板）**。整理日期：2026-10-22。
+状态：**批次 0+1 已实现并通过真机验证，已向上游提交 issue/PR（2026-10-22）**。整理日期：2026-10-22。
 基线：`dsh-im@8ebef5c`（`/ws` 工作区卡已上线，dsh web 于 07:15 重启后生效）。
+实施：集成分支 `feat/tg-ux-integration`（`/ws` + 批次 0 + 批次 1 + 两轮独立评审修复），真机验证见
+[Telegram交互体验真机验证记录.md](./Telegram交互体验真机验证记录.md)。
+上游：issue【xmanrui/dsh-im#429】、PR【#430 审批按钮卡】、【#431 菜单 scope + /status】；
+`/ws` 工作区卡仍在 fork 分支，是否单独提上游待定。
 调研输入（同目录/`docs/research/`）：
 
 - [command-ux-audit.md](../research/command-ux-audit.md) — 仓内命令审计（23 命令 × 12 渠道能力矩阵、19 条问题、Telegram 技术约束）
@@ -164,8 +168,11 @@
 | **3** | `/menu` hub、`/status` 卡、`/help` 分区卡、`/stop` 按钮、`/clear` 确认 | 2–4 天 | ✅ |
 | **4** | `/history` 更多、`/batch` 状态卡、`/permission*`、onboarding、过程卡 | 按需 | ✅ |
 
+实施状态（2026-10-22）：批次 0 与批次 1 均已完成并真机验证；批次 0 的「进度节流」按原计划
+暂缓（与上游在途 PR #423/#425/#426 同区域，先协调）；`/stop` 按钮、`/menu`、选择卡属于批次 2/3。
+
 ## 8. 决策点（需要拍板）
 
-1. **从哪批开工？** 建议 0 → 1（先把审批和地基拿下）；回复「做 0+1」即可。
-2. **是否抽 shared 抽象**（`action-card` / `menu-snapshot`）——影响面较大但仓内已有 4 套重复实现；建议抽，但可先在 Telegram 内部落地再回改其他渠道。
-3. **是否向上游 xmanrui/dsh-im 发 PR**（当前 fork 里是 draft，未合并）。
+1. **从哪批开工？** ✅ 已按 0 → 1 完成。
+2. **是否抽 shared 抽象**——✅ `shared/action-card.mjs` 已在 Telegram 落地；飞书/QQ/企微反向迁移留作后续。
+3. **是否向上游发 PR**——✅ 已提 issue #429 + PR #430/#431；`/ws` 卡片是否也提上游仍待定。

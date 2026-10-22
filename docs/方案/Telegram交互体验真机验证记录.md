@@ -61,5 +61,5 @@ KDE 首次截图弹过一次「允许应用获取截屏吗？」授权框，批�
 - 测试 bot 通过 BotFather `/deletebot` 删除；token 文件删除。
 - 独立实例 `dsh web` 停止；`~/.dsh-e2e` 整个删除；`~/.dsh/profiles/web/cordis.patch.yml` 的
   computer-use-linux MCP 条目回滚（测试期临时添加）。
-- `wings-gpd`：停用并移除本次创建的 ydotool user service、删除临时 token 文件；
-  保留 CUS 二进制（后续真机测试可复用）与截图授权。
+- `wings-gpd`：停用本次创建的 ydotool user service（保留 unit 便于下次复用）、删除临时 token 文件；
+  保留 CUS 二进制与截图授权（后续真机测试可复用）。
