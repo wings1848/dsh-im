@@ -3,6 +3,13 @@ import { t } from './i18n.mjs';
 /** Long enough to tell sessions apart in a chat, short enough to read. */
 const SESSION_ID_DISPLAY_LENGTH = 12;
 
+/**
+ * Optional /status fields must not hold the reply open when the Host is stuck.
+ * Three seconds is well above a healthy local RPC and short enough that the
+ * connection line is never buried behind a frozen Session/models read.
+ */
+export const STATUS_FIELD_TIMEOUT_MS = 3_000;
+
 function shortenedSessionId(sessionId) {
   return sessionId.length > SESSION_ID_DISPLAY_LENGTH
     ? `${sessionId.slice(0, SESSION_ID_DISPLAY_LENGTH)}…`
@@ -49,6 +56,12 @@ async function readRunning(session, options) {
   return (await session.isRunning(options)) === true;
 }
 
+/** Give the optional reads their own deadline, without cancelling the turn. */
+function fieldReadOptions(signal, timeoutMs) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return { signal: signal ? AbortSignal.any([signal, timeout]) : timeout };
+}
+
 /** A status field is optional: one failing read must not fail the command. */
 async function settled(operation) {
   try {
@@ -65,7 +78,9 @@ async function settled(operation) {
  * it is best-effort: a workspace, session binding, model or Agent Preset that
  * cannot be read is omitted (or explained) instead of turning the command into
  * a failure. The running-task line appears only when this chat's bound session
- * is actually running, so the common idle case stays short.
+ * is actually running, so the common idle case stays short. Optional reads use
+ * a bounded signal ({@link STATUS_FIELD_TIMEOUT_MS}) so a frozen Host cannot
+ * make the command hang.
  */
 export async function runStatusCommand({
   descriptor,
@@ -73,12 +88,17 @@ export async function runStatusCommand({
   state,
   conversationKey,
   signal,
+  fieldTimeoutMs = STATUS_FIELD_TIMEOUT_MS,
 } = {}) {
   if (!harness || typeof harness.ensureRunning !== 'function') {
     throw new TypeError('A Harness client with ensureRunning is required');
   }
   const options = signal ? { signal } : {};
   await harness.ensureRunning(options);
+  const fieldTimeout = Number.isSafeInteger(fieldTimeoutMs) && fieldTimeoutMs > 0
+    ? fieldTimeoutMs
+    : STATUS_FIELD_TIMEOUT_MS;
+  const fieldOptions = fieldReadOptions(signal, fieldTimeout);
 
   const label = descriptor?.label ?? 'Telegram';
   const lines = [t('{label}机器人与 DeepSeek Harness 连接正常。', { label })];
@@ -100,9 +120,9 @@ export async function runStatusCommand({
       : null))
     : null;
   const [model, preset, running] = await Promise.all([
-    session ? settled(() => readModel(session, options)) : null,
-    settled(() => readPreset(harness, options)),
-    session ? settled(() => readRunning(session, options)) : false,
+    session ? settled(() => readModel(session, fieldOptions)) : null,
+    settled(() => readPreset(harness, fieldOptions)),
+    session ? settled(() => readRunning(session, fieldOptions)) : false,
   ]);
   if (model) lines.push(t('当前模型：{model}', { model }));
   else if (!session) lines.push(t('当前模型：暂无（创建会话后显示）'));

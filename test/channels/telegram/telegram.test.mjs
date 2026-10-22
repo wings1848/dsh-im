@@ -1562,13 +1562,15 @@ test('Telegram runtime validates webhook state and starts a cancellable long pol
   await runtime.stop();
   assert.equal(runtime.status.ready, false);
   const [privateMenu, groupMenu] = telegramCommandMenuScopes();
-  assert.deepEqual(calls[0], { method: 'deleteMyCommands' });
-  assert.deepEqual(calls[1], {
+  // Scoped lists first, legacy default-scope cleanup last (a failed scoped
+  // write must leave the previous menu in place).
+  assert.deepEqual(calls[0], {
     method: 'setMyCommands', commands: privateMenu.commands, scope: { type: 'all_private_chats' },
   });
-  assert.deepEqual(calls[2], {
+  assert.deepEqual(calls[1], {
     method: 'setMyCommands', commands: groupMenu.commands, scope: { type: 'all_group_chats' },
   });
+  assert.deepEqual(calls[2], { method: 'deleteMyCommands' });
   assert.deepEqual(calls[3], { method: 'setChatMenuButton', menuButton: COMMANDS_MENU_BUTTON });
   assert.deepEqual(calls[4], { method: 'getUpdates', offset: -1, timeout: 0 });
   await rm(directory, { recursive: true, force: true });

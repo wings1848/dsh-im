@@ -71,7 +71,8 @@ const LOCAL_GUARDS = Object.freeze([
   'callback_data ≤ 64 字节（src/channels/telegram/telegram-api.mjs CALLBACK_DATA_MAX_BYTES）',
   '每条命令名 [a-z0-9_]{1,32}、描述 1-256 字符、每 scope ≤100 条（validateTelegramCommands）',
   '单条常规文本 ≤4096 字符（telegram-rich-message.mjs 切分常量）',
-  '提问卡每行 1 个、上限 8 个按钮；工作区卡上限 20 个（telegram-bridge.mjs）',
+  '提问卡每行 1 个、上限 8 个按钮（telegram-bridge.mjs）',
+  '工作区卡上限 20 个按钮只存在于 /ws 分支；合并 feat/tg-workspace-picker 后成立',
 ]);
 
 const LIVE_PLAN = Object.freeze([
