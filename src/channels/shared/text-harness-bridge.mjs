@@ -213,6 +213,9 @@ export class TextHarnessBridge {
   #workspaceCards = new Map();
   // Conversation key → the one picker card that is still authoritative there.
   #workspaceCardKeys = new Map();
+  // Optional channel-supplied session picker (same shape as the workspace one:
+  // parse/render plus a registry that owns the press lifecycle).
+  #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
   #approvalCard;
@@ -244,6 +247,7 @@ export class TextHarnessBridge {
     keepaliveIntervalMs = 4_000,
     interactionCard = null,
     workspaceCard = null,
+    sessionCard = null,
     approvalCard = null,
     approvalTimeoutMs,
     contextHooks = null,
@@ -268,6 +272,7 @@ export class TextHarnessBridge {
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
+    this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
@@ -1144,10 +1149,30 @@ export class TextHarnessBridge {
         await this.#bot.sendText(target, status.message);
         return;
       }
+      // Bare /session opens the same picker as /sessionlist when the channel can
+      // carry a keyboard. It goes through the list command so the picker and its
+      // text fallback share one enumeration; the historical usage text stays the
+      // answer for a channel without a card (the dispatch below is skipped).
+      if (!hasImages && !hasFiles && command === '/session'
+        && this.#sessionCard && typeof this.#bot.sendInteractionCard === 'function') {
+        const pickerCommand = await runWorkspaceCommand('/sessionlist', this.#harness, conversationKey);
+        if (pickerCommand && await this.#presentSessionCommand(
+          target, pickerCommand, conversationKey,
+        )) return;
+        if (pickerCommand) {
+          for (const reply of pickerCommand.messages ?? [pickerCommand.message]) {
+            await this.#bot.sendText(target, reply);
+          }
+          return;
+        }
+      }
       const workspaceCommand = !hasImages && !hasFiles
         ? await runWorkspaceCommand(text, this.#harness, conversationKey)
         : null;
       if (workspaceCommand && await this.#presentWorkspaceCommand(
+        target, workspaceCommand, conversationKey,
+      )) return;
+      if (workspaceCommand && await this.#presentSessionCommand(
         target, workspaceCommand, conversationKey,
       )) return;
       if (workspaceCommand) {
@@ -1836,6 +1861,10 @@ export class TextHarnessBridge {
     // namespace before the question bookkeeping so a press can never touch it.
     const workspacePress = this.#workspaceCard?.parse?.(callback.data) ?? null;
     if (workspacePress) return this.#handleWorkspaceCardPress(callback, key, workspacePress);
+    // Session pickers are the same kind of stateless command surface; their
+    // adapter owns the nonce registry and the bind-after-claim lifecycle.
+    const sessionPress = this.#sessionCard?.parse?.(callback.data) ?? null;
+    if (sessionPress) return this.#handleSessionCardPress(callback, key);
     // Approval cards own their callback namespace; every other press keeps using
     // the question-card path below. The card acknowledges the press itself (the
     // ack must be the first round-trip), so this branch runs before any other
@@ -1921,6 +1950,87 @@ export class TextHarnessBridge {
       // A failed submission rolls the question back, so let the user press again.
       if (this.#pendingInteractions.get(key) === pending) pending.callbackClaimed = false;
     });
+  }
+
+  /**
+   * Send the bare /sessionlist (or bare /session) listing as a session picker.
+   * Returns false so the caller keeps the text list: a failed or impossible card
+   * must never lose the listing.
+   */
+  async #presentSessionCommand(target, command, conversationKey) {
+    const listing = command?.sessionListing;
+    if (!listing
+      || typeof this.#sessionCard?.present !== 'function'
+      || typeof this.#bot.sendInteractionCard !== 'function') return false;
+    let currentSessionId = null;
+    try {
+      currentSessionId = typeof this.#state.sessionFor === 'function'
+        ? this.#state.sessionFor(conversationKey)
+        : null;
+    } catch {
+      // A failed read only loses the initial ✓ marker; the card still binds.
+      currentSessionId = null;
+    }
+    try {
+      return await this.#sessionCard.present({
+        target,
+        conversationKey,
+        listing,
+        currentSessionId,
+        bot: this.#bot,
+      }) === true;
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] unable to present the session picker; `
+        + 'falling back to the text list:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Route one session-picker press. The adapter owns the nonce lifecycle; the
+   * bridge only supplies the command gate (a card is a command surface) and the
+   * same typed bind path the text command uses.
+   */
+  async #handleSessionCardPress(callback, key) {
+    if (this.#signal?.aborted) return;
+    const notice = (text) => this.#answerInteractionCallback(callback, text);
+    const kind = callback.kind === 'group' ? 'group' : 'direct';
+    const decision = evaluateInboundAccess(this.#accessPolicy, {
+      conversationType: kind,
+      senderIds: [cleanText(callback.senderId)].filter(Boolean),
+      isCommand: true,
+    });
+    if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    try {
+      await this.#sessionCard.handlePress(callback, {
+        key,
+        bot: this.#bot,
+        answer: notice,
+        currentSessionId: () => {
+          try {
+            return typeof this.#state.sessionFor === 'function'
+              ? this.#state.sessionFor(key)
+              : null;
+          } catch {
+            return null;
+          }
+        },
+        // Reuse the typed binding command so adoption, workspace validation and
+        // every failure wording come from one place.
+        bind: (sessionId) => runWorkspaceCommand(
+          `/session ${sessionId}`, this.#harness, key,
+        ),
+      });
+    } catch (error) {
+      this.#logger.error?.(
+        `[dsh-im:${this.#descriptor.key}] failed to handle a session card press:`,
+        error,
+      );
+      await notice(t('这个会话列表已过期，请重新发送 /sessionlist 或 /session。'));
+    }
   }
 
   /**

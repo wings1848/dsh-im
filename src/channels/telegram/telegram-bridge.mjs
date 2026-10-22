@@ -3,6 +3,7 @@ import { t } from '../shared/i18n.mjs';
 import { TextHarnessBridge, createTextBridgeStatus } from '../shared/text-harness-bridge.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { TelegramApprovalCard } from './approval-card.mjs';
+import { TelegramSessionCard } from './session-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
   key: 'telegram',
@@ -136,6 +137,12 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       interactionCard: TELEGRAM_INTERACTION_CARD,
       workspaceCard: TELEGRAM_WORKSPACE_CARD,
       ...options,
+      // The session picker owns the action-card registry, so it lives per bridge
+      // (one bot has one set of conversations). `sessionCard: null` keeps the
+      // plain-text /sessionlist flow for a caller that wants it (tests/tools).
+      sessionCard: options && Object.hasOwn(options, 'sessionCard')
+        ? options.sessionCard
+        : new TelegramSessionCard({ logger: options?.logger }),
       approvalCard: options && Object.hasOwn(options, 'approvalCard')
         ? options.approvalCard
         : new TelegramApprovalCard({ logger: options?.logger }),

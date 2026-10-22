@@ -44,4 +44,23 @@ export default {
     'This approval was superseded by a newer prompt; use the latest one.',
   '该审批已失效，请等待新的审批提示。':
     'This approval is no longer valid; wait for a new approval prompt.',
+  // Session-list picker card (batch 2): pager, row hint, binding receipt and
+  // dead-card notices. Keys match the literals passed through t() in
+  // session-card.mjs (including the state overrides translated at use).
+  '第 {page}/{pageCount} 页': 'Page {page}/{pageCount}',
+  '点击按钮把会话绑定到当前聊天。': 'Tap a session button to bind it to this chat.',
+  '已经是第 {page} 页。': 'Already on page {page}.',
+  '当前聊天已经绑定该会话。': 'This chat is already bound to that Session.',
+  '已绑定会话：{title}': 'Bound to Session: {title}',
+  '这个会话列表已过期，请重新发送 /sessionlist 或 /session。':
+    'This session list has expired. Send /sessionlist or /session again.',
+  '这个会话列表已处理，请重新发送 /sessionlist。':
+    'This session list was already handled. Send /sessionlist again.',
+  '这个会话列表已被更新的列表取代，请使用最新一条。':
+    'This session list was replaced by a newer one; use the latest.',
+  '这个会话列表已失效，请重新发送 /sessionlist。':
+    'This session list is no longer valid. Send /sessionlist again.',
+  '正在绑定会话，请稍候。': 'Binding the Session, one moment.',
+  '暂时无法更新会话列表，请重新发送 /sessionlist。':
+    'Could not update the session list right now. Send /sessionlist again.',
 };
