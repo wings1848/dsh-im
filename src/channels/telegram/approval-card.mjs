@@ -55,6 +55,8 @@ const TERMINAL_LABEL = Object.freeze({
   expired: '⏰ 已过期',
   unavailable: '⛔ 已失效',
 });
+/** Telegram rejects a single message body over this many characters. */
+export const TELEGRAM_APPROVAL_CARD_MAX_CHARS = 4_096;
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 const TERMINAL_STATUS_BY_OUTCOME = Object.freeze({
   'allowed-once': ACTION_CARD_STATUS.RESOLVED,
@@ -96,11 +98,11 @@ export function telegramApprovalMarkup(nonce) {
   return {
     inline_keyboard: [[
       {
-        text: BUTTON_TEXT.approve,
+        text: t(BUTTON_TEXT.approve),
         callback_data: telegramApprovalCallbackData(nonce, 'approve'),
       },
       {
-        text: BUTTON_TEXT.reject,
+        text: t(BUTTON_TEXT.reject),
         callback_data: telegramApprovalCallbackData(nonce, 'reject'),
       },
     ]],
@@ -123,7 +125,8 @@ export function telegramApprovalCardText(pending) {
 
 function terminalCardText(cardText, outcome, resolvedText) {
   const label = TERMINAL_LABEL[outcome]
-    ?? (typeof resolvedText === 'string' ? resolvedText : '');
+    ? t(TERMINAL_LABEL[outcome])
+    : (typeof resolvedText === 'string' ? resolvedText : '');
   return label ? `${cardText}\n\n${label}` : cardText;
 }
 
@@ -185,6 +188,17 @@ export class TelegramApprovalCard {
       send: guardedSend,
       render: async (pending) => {
         const text = telegramApprovalCardText(pending);
+        // sendInteractionCard cannot split a body, and sendMessage rejects
+        // anything over 4096 characters. A body that big keeps the text path,
+        // which splits the same bytes instead of logging a doomed 400.
+        if (text.length > TELEGRAM_APPROVAL_CARD_MAX_CHARS) {
+          this.#logger.warn?.(
+            '[dsh-im:telegram] approval body exceeds the Telegram message limit; using the plain-text approval:',
+            `${text.length} chars`,
+          );
+          await rawSend(pending.text);
+          return;
+        }
         const entry = this.#registry.issue({
           conversationKey: key,
           kind: 'approval',
@@ -201,6 +215,8 @@ export class TelegramApprovalCard {
             messageId: sent?.providerMessageIds?.at(-1) ?? null,
             text,
           };
+          // The card now owns the decision guidance and the terminal receipt.
+          pending.interactiveCard = true;
         } catch (error) {
           // A platform that refuses the keyboard must not lose the approval:
           // clear the registration and send the exact pre-card prompt instead.
@@ -214,26 +230,28 @@ export class TelegramApprovalCard {
         }
       },
       onResolved: async (resolvedText, outcome) => {
-        if (!card) return;
+        if (!card) return false;
         this.#registry.settle(
           card.nonce,
           TERMINAL_STATUS_BY_OUTCOME[outcome] ?? ACTION_CARD_STATUS.RESOLVED,
         );
-        if (card.messageId === null) return;
+        if (card.messageId === null) return false;
         try {
           await bot.editInteractionCard(target, card.messageId, {
             text: terminalCardText(card.text, outcome, resolvedText),
             markup: EMPTY_KEYBOARD,
           });
-          // The edit landed (or the client already shows it): the queue's extra
-          // terminal text would duplicate the receipt.
+          // The edit landed (or the client already shows it): tell the queue the
+          // receipt is delivered so it skips the duplicate terminal text.
           swallowResolvedText = resolvedText;
+          return true;
         } catch (error) {
           this.#logger.warn?.(
             '[dsh-im:telegram] could not update a resolved approval card; the text receipt follows:',
             error?.message ?? error,
           );
           await this.#retireKeyboard(bot, target, card.messageId);
+          return false;
         }
       },
     };
@@ -297,9 +315,12 @@ export class TelegramApprovalCard {
 
   async #retireKeyboard(bot, target, providerMessageId) {
     if (typeof bot?.updateInteractionCard !== 'function') return;
-    if (!target || !Number.isSafeInteger(providerMessageId)) return;
+    // Card delivery hands back string ids (Bot API message ids are numbers), so
+    // normalise before validating; a string guard silently skipped every cleanup.
+    const messageId = Number(providerMessageId);
+    if (!target || !Number.isSafeInteger(messageId)) return;
     try {
-      await bot.updateInteractionCard(target, providerMessageId, { markup: EMPTY_KEYBOARD });
+      await bot.updateInteractionCard(target, messageId, { markup: EMPTY_KEYBOARD });
     } catch (error) {
       this.#logger.warn?.(
         '[dsh-im:telegram] could not clear a stale approval keyboard:',
