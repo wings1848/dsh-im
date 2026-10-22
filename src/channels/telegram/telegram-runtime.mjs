@@ -1447,16 +1447,17 @@ export class TelegramRuntime {
   // Commands are registered per BotCommandScope, and the scopes overlap: a
   // default-scope list from an earlier version would keep applying wherever a
   // scoped list is missing and could advertise private-only commands in groups.
-  // Every sync therefore clears the default scope first, then replaces both the
-  // private and the group lists (deleting a scope when its catalog is empty).
-  // No language code is sent, so one list covers all client languages.
+  // The scoped lists are written first and only then is the legacy default
+  // scope cleared, so a failed scoped write leaves the previous (default-scope)
+  // menu usable until the next reconnect instead of blanking the menu. No
+  // language code is sent, so one list covers all client languages.
   async #sendCommandMenu(api, signal) {
     const menus = telegramCommandMenuScopes(this.#commandCatalog);
-    await api.deleteMyCommands({ signal });
     for (const { scope, commands } of menus) {
       if (commands.length > 0) await api.setMyCommands({ commands, scope, signal });
       else await api.deleteMyCommands({ scope, signal });
     }
+    await api.deleteMyCommands({ signal });
   }
 
   /**

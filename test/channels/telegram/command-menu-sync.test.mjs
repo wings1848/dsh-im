@@ -31,10 +31,11 @@ function memoryState() {
   };
 }
 
-function server({ failMethod, updates = [], identity = '123456789', webhook = '', gates = {} } = {}) {
+function server({ failMethod, failAfter, updates = [], identity = '123456789', webhook = '', gates = {} } = {}) {
   const calls = [];
   // Mutable so a test can start a healthy bot and then fail one later call.
-  const faults = { failMethod };
+  // failAfter: allow that many successful attempts of failMethod first.
+  const faults = { failMethod, failAfter };
   // Hold one method's response open until the test releases it, so a language
   // switch can be interleaved inside a partially-completed startup.
   const gatePromises = new Map(Object.entries(gates).map(([method, promise]) => [method, promise]));
@@ -51,7 +52,8 @@ function server({ failMethod, updates = [], identity = '123456789', webhook = ''
         const method = url.pathname.split('/').at(-1);
         const body = JSON.parse(options.body);
         calls.push({ method, body });
-        if (method === faults.failMethod) {
+        const attempt = calls.filter((call) => call.method === method).length;
+        if (method === faults.failMethod && attempt > (faults.failAfter ?? 0)) {
           return new Response(JSON.stringify({ ok: false, error_code: 502, description: 'Test failure' }));
         }
         if (gatePromises.has(method)) {
@@ -100,7 +102,7 @@ const bodyFor = (scope, catalog) => {
   return { commands: menu.commands, scope: { type: scope } };
 };
 
-test('runtime clears the legacy default scope, then registers private and group menus', async (t) => {
+test('runtime registers private and group menus, then clears the legacy default scope', async (t) => {
   const previous = getImHostLanguage();
   t.after(() => setImHostLanguage(previous));
   setImHostLanguage('en');
@@ -109,20 +111,20 @@ test('runtime clears the legacy default scope, then registers private and group 
   await runtime.start();
   assert.equal(runtime.status.ready, true);
   assert.deepEqual(apiServer.calls.slice(0, 8).map(({ method }) => method), [
-    'getMe', 'getWebhookInfo', 'deleteMyCommands', 'setMyCommands', 'setMyCommands',
+    'getMe', 'getWebhookInfo', 'setMyCommands', 'setMyCommands', 'deleteMyCommands',
     'setChatMenuButton', 'getUpdates', 'getUpdates',
   ]);
 
   const menus = menuCalls(apiServer);
   assert.equal(menus.length, 3);
-  // Telegram keeps commands per scope; a leftover default-scope list from an
-  // older version would merge into chats that match no scoped list.
-  assert.deepEqual(menus[0], { method: 'deleteMyCommands', body: {} });
-  assert.deepEqual(menus[1].body, bodyFor('all_private_chats'));
-  assert.deepEqual(menus[2].body, bodyFor('all_group_chats'));
+  // The scoped lists must be in place before the legacy default-scope list is
+  // cleared: a failing scoped write then still leaves the old menu working.
+  assert.deepEqual(menus[0].body, bodyFor('all_private_chats'));
+  assert.deepEqual(menus[1].body, bodyFor('all_group_chats'));
+  assert.deepEqual(menus[2], { method: 'deleteMyCommands', body: {} });
 
-  const privateNames = menus[1].body.commands.map((item) => item.command);
-  const groupNames = menus[2].body.commands.map((item) => item.command);
+  const privateNames = menus[0].body.commands.map((item) => item.command);
+  const groupNames = menus[1].body.commands.map((item) => item.command);
   for (const name of ['history', 'batch', 'send', 'cancel']) {
     assert.ok(privateNames.includes(name), `${name} belongs in the private menu`);
     assert.ok(!groupNames.includes(name), `${name} must not appear in the group menu`);
@@ -132,7 +134,7 @@ test('runtime clears the legacy default scope, then registers private and group 
     assert.ok(!privateNames.includes(alias), `${alias} must stay hidden`);
     assert.ok(!groupNames.includes(alias), `${alias} must stay hidden`);
   }
-  assert.equal(menus[1].body.commands.find((item) => item.command === 'history').description,
+  assert.equal(menus[0].body.commands.find((item) => item.command === 'history').description,
     'Show recent history (private chats only)');
   assert.deepEqual(apiServer.calls[5].body, { menu_button: { type: 'commands' } });
 
@@ -143,9 +145,9 @@ test('runtime clears the legacy default scope, then registers private and group 
   await runtime.start();
   const afterRestart = menuCalls(apiServer).slice(3);
   assert.deepEqual(afterRestart.map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
-  assert.deepEqual(afterRestart[1].body, bodyFor('all_private_chats'));
-  assert.equal(afterRestart[1].body.commands.find((item) => item.command === 'history').description,
+    ['setMyCommands', 'setMyCommands', 'deleteMyCommands']);
+  assert.deepEqual(afterRestart[0].body, bodyFor('all_private_chats'));
+  assert.equal(afterRestart[0].body.commands.find((item) => item.command === 'history').description,
     '查看最近历史消息（仅私聊）');
 });
 
@@ -164,9 +166,9 @@ test('a live interface language switch re-sends both scoped menus without a reco
   assert.equal(await runtime.refreshCommandMenu(), true);
   const refreshed = menuCalls(apiServer).slice(3);
   assert.deepEqual(refreshed.map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
-  assert.deepEqual(refreshed[1].body, bodyFor('all_private_chats'));
-  assert.deepEqual(refreshed[2].body, bodyFor('all_group_chats'));
+    ['setMyCommands', 'setMyCommands', 'deleteMyCommands']);
+  assert.deepEqual(refreshed[0].body, bodyFor('all_private_chats'));
+  assert.deepEqual(refreshed[1].body, bodyFor('all_group_chats'));
   assert.equal(setCommands(apiServer).at(-2).body.commands
     .find((item) => item.command === 'history').description, 'Show recent history (private chats only)');
   // The menu button belongs to connect; a language refresh only replaces text.
@@ -184,12 +186,12 @@ test('a live interface language switch re-sends both scoped menus without a reco
     'deleteMyCommands', 'deleteMyCommands', 'deleteMyCommands',
   ]);
   assert.deepEqual(menuCalls(emptyServer).map(({ body }) => body), [
-    {},
     { scope: { type: 'all_private_chats' } },
     { scope: { type: 'all_group_chats' } },
     {},
     { scope: { type: 'all_private_chats' } },
     { scope: { type: 'all_group_chats' } },
+    {},
   ]);
 });
 
@@ -222,14 +224,48 @@ test('a language switch during connection is reconciled once the bot is ready', 
   const menus = menuCalls(apiServer);
   assert.equal(menus.length, 6, 'the initial sync plus one catch-up re-send');
   assert.deepEqual(menus.slice(0, 3).map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
+    ['setMyCommands', 'setMyCommands', 'deleteMyCommands']);
   assert.deepEqual(menus.slice(3).map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
-  assert.equal(menus[1].body.commands.find((item) => item.command === 'help').description, '显示帮助',
+    ['setMyCommands', 'setMyCommands', 'deleteMyCommands']);
+  assert.equal(menus[0].body.commands.find((item) => item.command === 'help').description, '显示帮助',
     'the initial menu was sent in the language in force when it started');
-  assert.deepEqual(menus[4].body, bodyFor('all_private_chats'));
-  assert.equal(menus[4].body.commands.find((item) => item.command === 'help').description, '显示帮助',
+  assert.deepEqual(menus[3].body, bodyFor('all_private_chats'));
+  assert.equal(menus[3].body.commands.find((item) => item.command === 'help').description, '显示帮助',
     'the catch-up must end on the latest language, not the one current at the first send');
+});
+
+test('a failing scoped write keeps the legacy default menu instead of wiping the menu', async (t) => {
+  const apiServer = server({ failMethod: 'setMyCommands', failAfter: 1, updates: [{
+    update_id: 0,
+    message: {
+      message_id: 1, chat: { id: 88, type: 'private' },
+      from: { id: 42, is_bot: false }, text: '/help',
+    },
+  }] });
+  const warnings = [];
+  const runtime = runtimeFor(t, apiServer, {
+    logger: { warn: (...args) => warnings.push(args), error() {} },
+  });
+  await runtime.start();
+  assert.equal(runtime.status.ready, true, 'a failed scoped write must not block the bot');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0][0], /command menu setup failed/);
+  // The private list was written, the group write failed. The legacy default
+  // scope is the only menu left, so it must not have been deleted.
+  assert.deepEqual(setCommands(apiServer).map(({ body }) => body.scope.type),
+    ['all_private_chats', 'all_group_chats']);
+  assert.equal(apiServer.calls.filter(({ method }) => method === 'deleteMyCommands').length, 0,
+    'the default scope must stay untouched when a scoped write fails');
+  let timer;
+  try {
+    const text = await Promise.race([
+      apiServer.reply,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('No help reply')), 1000); }),
+    ]);
+    assert.match(text, /\/history/);
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 test('refreshing the menu of a bot that is not connected changes nothing', async (t) => {
@@ -260,16 +296,16 @@ test('a failed menu refresh warns, reports failure and leaves the bot connected'
   assert.equal(warnings.length, 1);
   assert.match(warnings[0][0], /command menu refresh failed/);
   assert.deepEqual(menuCalls(apiServer).slice(3).map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands'],
-    'a failing scope stops the remaining scopes instead of switching to text');
+    ['setMyCommands'],
+    'a failing scoped write stops before the legacy default list is cleared');
 
   // A later healthy refresh still succeeds; the failure is not sticky.
   apiServer.faults.failMethod = undefined;
   assert.equal(await runtime.refreshCommandMenu(), true);
-  const recovered = menuCalls(apiServer).slice(5);
+  const recovered = menuCalls(apiServer).slice(4);
   assert.deepEqual(recovered.map(({ method }) => method),
-    ['deleteMyCommands', 'setMyCommands', 'setMyCommands']);
-  assert.deepEqual(recovered[1].body, bodyFor('all_private_chats'));
+    ['setMyCommands', 'setMyCommands', 'deleteMyCommands']);
+  assert.deepEqual(recovered[0].body, bodyFor('all_private_chats'));
 });
 
 test('the controller fans a language refresh out to every bot and contains one failure', async (t) => {
@@ -385,8 +421,10 @@ test('controller reconnect rebuilds runtime and replaces removed, hidden and emp
   const beforeEmpty = menuCalls(apiServer).length;
   catalog = [];
   await controller.reconnectBot(botId);
-  assert.deepEqual(menuCalls(apiServer).slice(beforeEmpty).map(({ method }) => method), [
-    'deleteMyCommands', 'deleteMyCommands', 'deleteMyCommands',
+  assert.deepEqual(menuCalls(apiServer).slice(beforeEmpty).map(({ body }) => body), [
+    { scope: { type: 'all_private_chats' } },
+    { scope: { type: 'all_group_chats' } },
+    {},
   ]);
   assert.equal(runtimes.length, 4);
   assert.ok(runtimes.slice(0, -1).every((runtime) => runtime.status.ready === false));

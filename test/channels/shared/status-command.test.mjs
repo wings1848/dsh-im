@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import { getImHostLanguage, setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import {
+  STATUS_FIELD_TIMEOUT_MS,
+  runStatusCommand,
+} from '../../../src/channels/shared/status-command.mjs';
+import {
   createTextBridgeStatus,
   TextHarnessBridge,
 } from '../../../src/channels/shared/text-harness-bridge.mjs';
@@ -168,4 +172,74 @@ test('status localizes every added line', async (t) => {
     'Agent Preset: Marketing Preset（marketing-jeep）',
     'Running task: yes (send /stop to stop it)',
   ]);
+});
+
+
+test('a stuck Host cannot hold /status open: optional reads are bounded', async () => {
+  assert.ok(Number.isSafeInteger(STATUS_FIELD_TIMEOUT_MS) && STATUS_FIELD_TIMEOUT_MS > 0
+    && STATUS_FIELD_TIMEOUT_MS <= 5_000, 'the shared field timeout stays short');
+  const never = (options) => new Promise((_, reject) => {
+    options?.signal?.addEventListener(
+      'abort',
+      () => reject(options.signal.reason ?? new Error('aborted')),
+      { once: true },
+    );
+  });
+  const harness = {
+    async ensureRunning() {},
+    currentWorkspace: () => WORKSPACE,
+    currentConversationWorkspace: () => WORKSPACE,
+    workspaceSession: () => ({ sessionExists: async () => true, models: never, isRunning: never }),
+    agentPresetSettings: never,
+  };
+  let timer;
+  let result;
+  try {
+    result = await Promise.race([
+      runStatusCommand({
+        descriptor: { label: 'Telegram' },
+        harness,
+        state: stateWithSession(SESSION_ID),
+        conversationKey: 'direct:chat-a',
+        fieldTimeoutMs: 20,
+      }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('/status did not return within the field timeout')), 1_500);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+  assert.deepEqual(result.message.split('\n'), [
+    'Telegram机器人与 DeepSeek Harness 连接正常。',
+    `工作区：${WORKSPACE}`,
+    '绑定会话：session-abcd…',
+  ], 'timed-out fields are omitted, the connection line still arrives');
+});
+
+test('text channels without workspace or preset APIs (iMessage/Email) still answer /status', async () => {
+  const sent = [];
+  const bridge = new TextHarnessBridge({
+    descriptor: { key: 'imessage', label: 'iMessage' },
+    bot: { async sendText(target, text) { sent.push(text); } },
+    harness: { async ensureRunning() {} },
+    state: stateWithSession(null),
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: 'status-minimal-channel',
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-a',
+    content: '/status',
+    addressed: true,
+    replyTarget: { id: 'target-status' },
+  });
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].split('\n'), [
+    'iMessage机器人与 DeepSeek Harness 连接正常。',
+    '绑定会话：未绑定（发送消息后自动创建）',
+    '当前模型：暂无（创建会话后显示）',
+  ], 'missing optional harness APIs degrade to the connection + binding lines');
 });
