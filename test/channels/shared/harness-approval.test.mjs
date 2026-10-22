@@ -1292,3 +1292,43 @@ test('a resolved approval reports the outcome next to its receipt text', async (
   assert.equal(await queue.submitByApprovalId('outcome', 'allowed-once', { actor: 'actor-a' }), true);
   assert.deepEqual(seen, [['已批准，仅对本次操作有效。', 'allowed-once']]);
 });
+
+test('a presentation that delivered the receipt suppresses the duplicate terminal text', async () => {
+  const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
+  const sent = [];
+  const respond = async () => ({ accepted: true });
+  await queue.handleRequested(interaction({ id: 'receipt', toolName: 'bash', respond }), {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => { sent.push(text); },
+    render: async () => {},
+    // The interactive presentation edited the original message into its receipt.
+    onResolved: async () => true,
+  });
+  assert.equal(await queue.submitByApprovalId('receipt', 'allowed-once', { actor: 'actor-a' }), true);
+  assert.deepEqual(sent, [], 'no second terminal text after an interactive receipt');
+});
+
+test('an interactive presentation suppresses the type-a-reply prompt for ordinary text', async () => {
+  const queue = new HarnessApprovalQueue({ logger: { warn() {}, error() {} } });
+  const sent = [];
+  const respond = async () => ({ accepted: true });
+  await queue.handleRequested(interaction({ id: 'interactive', toolName: 'bash', respond }), {
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    send: async (text) => { sent.push(text); },
+    // Channel marks the pending item once the keyboard really reached the user.
+    render: async (pending) => { pending.interactiveCard = true; },
+  });
+  const reply = queue.claimReply({
+    key: 'direct:actor-a',
+    actor: 'actor-a',
+    text: '随便说一句',
+    addressed: true,
+    send: async (text) => { sent.push(text); },
+  });
+  assert.ok(reply, 'ordinary text is still claimed by the approval route');
+  await reply.process();
+  assert.deepEqual(sent, [], 'a button card must not ask the user to type the decision');
+  assert.equal(queue.hasPending('direct:actor-a'), true, 'no decision was submitted');
+});

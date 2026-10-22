@@ -242,7 +242,9 @@ export class HarnessApprovalQueue {
               return;
             }
             if (!decision) {
-              await send(t(APPROVAL_PROMPT));
+              // A button card already tells the user how to decide; repeating
+              // the type-the-decision prompt would contradict its buttons.
+              if (!pending.interactiveCard) await send(t(APPROVAL_PROMPT));
               return;
             }
             await this.#submit(pending, decision);
@@ -372,6 +374,10 @@ export class HarnessApprovalQueue {
       deliveryCompleted: false,
       replyTail: null,
       submitting: false,
+      // Set by a channel renderer once an interactive card really reached the
+      // user. It means the card owns the decision guidance and the receipt, so
+      // the plain-text prompts/receipts below must stay quiet.
+      interactiveCard: false,
       inactive: false,
       resolving: false,
       closedOutcome: null,
@@ -616,11 +622,16 @@ export class HarnessApprovalQueue {
     // resolved event cannot replace the confirmed result or notify twice.
     pending.resolutionNotified = true;
     const text = approvalOutcomeText(outcome);
+    let deliveredByPresentation = false;
     try {
-      await pending.onResolved?.(text, outcome);
+      // A card renderer returns true when it already edited the original message
+      // into the receipt; the separate terminal text would then be a duplicate
+      // (and the pending.send may have been swapped by an interim text reply).
+      deliveredByPresentation = (await pending.onResolved?.(text, outcome)) === true;
     } catch (error) {
       this.#logger.warn?.(`[dsh-im:${this.#label}] failed to update a resolved approval:`, error);
     }
+    if (deliveredByPresentation) return;
     await send(text).catch(() => undefined);
   }
 

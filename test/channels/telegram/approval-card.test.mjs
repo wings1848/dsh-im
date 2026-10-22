@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { harnessApprovalText } from '../../../src/channels/shared/harness-approval.mjs';
+import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { TelegramApi } from '../../../src/channels/telegram/telegram-api.mjs';
 import {
   TelegramHarnessBridge,
@@ -130,6 +131,7 @@ function callback(overrides = {}) {
 
 function approvalInteraction({
   sessionId = 'session-one',
+  argumentsText = ARGUMENTS_TEXT,
   respond = async () => ({ accepted: true }),
 } = {}) {
   return {
@@ -138,7 +140,7 @@ function approvalInteraction({
     rpcId: `rpc-${APPROVAL_ID}`,
     sessionId,
     payload: { ...APPROVAL_PAYLOAD, sessionId },
-    toolCall: { ...APPROVAL_TOOL_CALL },
+    toolCall: { ...APPROVAL_TOOL_CALL, arguments: argumentsText },
     respond,
   };
 }
@@ -157,6 +159,7 @@ function bridgeFixture({
   supportsCards = true,
   ackDelayMs = 0,
   approvalTimeoutMs,
+  argumentsText,
   harness,
 } = {}) {
   const { state } = stateFixture();
@@ -207,6 +210,7 @@ function bridgeFixture({
       const answered = deferredWithReject();
       await options.onInteraction(approvalInteraction({
         sessionId,
+        ...(argumentsText === undefined ? {} : { argumentsText }),
         respond: async (result) => {
           env.events.push('submit');
           env.submissions.push(result);
@@ -604,4 +608,116 @@ test('the card edit degrades to editMessageReplyMarkup when text+keyboard is ref
   ]);
   assert.deepEqual(calls[1].payload.reply_markup, { inline_keyboard: [] });
   assert.equal('reply_markup' in calls[2].payload, false);
+});
+
+test('a failed terminal card edit still clears the dead keyboard (normalised message id)', async () => {
+  const { bridge, controller, env } = bridgeFixture({ cardEditResult: 'fail' });
+  const processing = bridge.accept(message('m-1', '启动审批'));
+  await eventually(() => env.cards.length === 1);
+
+  await bridge.acceptCallback(callback({ data: pressData(env.cards, 0) }));
+  await eventually(() => env.submissions.length === 1);
+  // The card text edit failed, but the keyboard must not stay pressable: the
+  // stored message id is a string and has to be normalised before the guard.
+  await eventually(() => env.edits.length >= 1);
+  assert.deepEqual(env.edits.at(-1), {
+    messageId: 700,
+    markup: { inline_keyboard: [] },
+  });
+
+  await stopFixture(controller, processing);
+});
+
+test('ordinary text while a card is live neither asks for typing nor duplicates the receipt', async () => {
+  const { bridge, controller, env } = bridgeFixture();
+  const processing = bridge.accept(message('m-1', '启动审批'));
+  await eventually(() => env.cards.length === 1);
+
+  await bridge.accept(message('m-2', '随便说一句'));
+  assert.equal(env.submissions.length, 0, 'ordinary text is not an approval decision');
+  assert.equal(
+    env.sent.some((text) => /请精准回复/u.test(text)),
+    false,
+    'the button card must not answer ordinary text with the type-the-decision prompt',
+  );
+
+  await bridge.acceptCallback(callback({ data: pressData(env.cards, 0) }));
+  await eventually(() => env.submissions.length === 1);
+  await eventually(() => env.edits.length === 1);
+  assert.equal(
+    env.sent.filter((text) => text === '已批准，仅对本次操作有效。').length,
+    0,
+    'a card receipt is the only terminal notice after the owner already replied in text',
+  );
+
+  await stopFixture(controller, processing);
+});
+
+test('typing 批准 and then pressing the card keeps a single terminal receipt', async () => {
+  const { bridge, controller, env } = bridgeFixture();
+  const processing = bridge.accept(message('m-1', '启动审批'));
+  await eventually(() => env.cards.length === 1);
+
+  await bridge.accept(message('m-2', '批准'));
+  await eventually(() => env.submissions.length === 1);
+  assert.equal(env.submissions[0].value.outcome, 'allowed-once');
+  await eventually(() => env.edits.length === 1);
+  assert.match(env.edits[0].text, /已批准（仅本次）/u);
+  assert.equal(
+    env.sent.includes('已批准，仅对本次操作有效。'),
+    false,
+    'the card is the terminal receipt; no duplicate chat message',
+  );
+
+  // Pressing the now-terminal keyboard must not decide a second time.
+  await bridge.acceptCallback(callback({ data: pressData(env.cards, 0), callbackQueryId: 'cb-late' }));
+  assert.equal(env.submissions.length, 1);
+  assert.match(env.notices.at(-1).text, /已处理|已失效/u);
+
+  await stopFixture(controller, processing);
+});
+
+test('an oversized approval body keeps the plain-text flow instead of a doomed card', async () => {
+  const bigArguments = JSON.stringify({ command: `echo ${'x'.repeat(4_500)}` });
+  const expected = harnessApprovalText(APPROVAL_PAYLOAD, {
+    toolCall: { ...APPROVAL_TOOL_CALL, arguments: bigArguments },
+  });
+  assert.ok(expected.length > 4_096, 'the fixture must exceed Telegram\'s message limit');
+  const { bridge, controller, env } = bridgeFixture({ argumentsText: bigArguments });
+  const processing = bridge.accept(message('m-1', '启动超长审批'));
+  await eventually(() => env.sent.length === 1);
+
+  assert.equal(env.cardAttempts, 0, 'a body Telegram will reject must not be sent as a card');
+  assert.equal(env.cards.length, 0);
+  assert.equal(env.sent[0], expected, 'the split-capable text path takes over unchanged');
+
+  await bridge.accept(message('m-2', '批准'));
+  await eventually(() => env.submissions.length === 1);
+  assert.equal(env.submissions[0].value.outcome, 'allowed-once');
+
+  await stopFixture(controller, processing);
+});
+
+test('approval card labels follow the host language', async () => {
+  setImHostLanguage('en');
+  try {
+    const { bridge, controller, env } = bridgeFixture();
+    const processing = bridge.accept(message('m-1', 'start an approval'));
+    await eventually(() => env.cards.length === 1);
+    assert.deepEqual(
+      env.cards[0].markup.inline_keyboard.flat().map((button) => button.text),
+      ['✅ Approve once', '❌ Reject'],
+    );
+
+    await bridge.acceptCallback(callback({ data: pressData(env.cards, 0) }));
+    await eventually(() => env.edits.length === 1);
+    assert.match(env.edits[0].text, /✅ Approved \(this time only\)/u);
+
+    await bridge.acceptCallback(callback({ data: pressData(env.cards, 0), callbackQueryId: 'cb-late' }));
+    assert.match(env.notices.at(-1).text, /already (?:handled|processed)/u);
+
+    await stopFixture(controller, processing);
+  } finally {
+    setImHostLanguage('zh');
+  }
 });

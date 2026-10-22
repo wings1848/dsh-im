@@ -1,7 +1,8 @@
 # Telegram 审批按钮卡方案（批次1）
 
-状态：**已实施（待集成）** ｜ 分支：`feat/tg-approval-card` ｜ 基于：`main` = 上游 `27bd7a2`
-日期：2026-10-22 ｜ 对应路线图批次 1（按 Lead 协调，路线图/调研文档不在本分支引入，状态由 Lead 集成时统一更新）
+状态：**已实施 + 独立评审问题已修复（待集成）** ｜ 分支：`feat/tg-approval-card` ｜ 基于：`main` = 上游 `27bd7a2`
+提交：`5f5c07a`（功能）→ `ff6466e`（评审修复）→ `243306d`（i18n 去重）→ 本方案文档
+日期：2026-10-22（评审修复同日）｜ 对应路线图批次 1（按 Lead 协调，路线图/调研文档不在本分支引入，状态由 Lead 集成时统一更新）
 
 交付三件事：
 
@@ -307,9 +308,35 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 | `resolved`（其他端已处理） | 共享队列的终态文本 | 同上 |
 
 - 卡片正文保留工具/参数/原因，终态只是尾部追加；
-- 卡片编辑成功后，队列随后要发的那条「已批准，仅对本次操作有效。」被去重吞掉
-  （用 send 包装器按文本匹配，仅吞一次）；编辑失败则不吞，保证文字终态照发；
-- 编辑报 `message is not modified` 视为成功（客户端已显示同一终态）。
+- 成功终态**只出现一次**：`onResolved` 返回 `true` 表示「卡片已送达终态」，
+  共享队列据此跳过随后那条「已批准，仅对本次操作有效。」文本（即使 `pending.send`
+  已被 owner 的临时文字回复换掉）；编辑失败返回 `false`，队列照发文字终态保底；
+  send 包装器的文本去重保留为第二道保险；
+- 编辑报 `message is not modified` 视为成功（客户端已显示同一终态），同样返回 `true`；
+- 按钮/终态/toast 全部经过 `t()`：中文是 identity，en 下有英文（见 §3.4.2）。
+
+#### 3.4.1 交互卡与共享队列的契约（评审修复 #2）
+
+| 契约 | 实现 | 为什么 |
+| --- | --- | --- |
+| 卡片送达后由 renderer 置 `pending.interactiveCard = true` | `approval-card.render` 成功发卡后设置 | 卡片已承担「怎么决定」的引导，文字提示不该和按钮打架 |
+| 卡片活动时普通文字不再回「请精准回复…」 | `HarnessApprovalQueue.claimReply` 看到 `interactiveCard` 就不发 prompt | 评审复现：owner 发任意文字会收到与按钮矛盾的提示 |
+| `onResolved` 返回 `true` = 终态已由卡片送达 | `#notifyResolved` 收到 `true` 就跳过 `send(text)` | 评审复现：owner 先发文字会换掉 `pending.send`，导致卡片终态之外又发一条重复终态 |
+| `onResolved` 返回 `false`/`undefined` = 仍由队列发文字 | 编辑失败、卡片 absent、其他渠道（飞书/QQ/…）都返回 undefined | 不改变任何非 Telegram 渠道与文字降级路径 |
+
+#### 3.4.2 文案与 i18n（评审 #3）
+
+按钮（`✅ 批准一次` / `❌ 拒绝`）、终态标签（`✅ 已批准（仅本次）` / `❌ 已拒绝` /
+`⏰ 已过期` / `⛔ 已失效`）、死卡 toast 全部走 `t()`；英文条目在
+`src/channels/shared/i18n-en/telegram.mjs`。测试 `approval card labels follow the host language`
+在 en 下断言按钮、终态、toast 都是英文。其他语言沿用仓内既有回退（未翻译 → 中文）。
+
+#### 3.4.3 超长正文（评审 #3）
+
+`sendInteractionCard` 是一条消息、不能拆分；Telegram `sendMessage` 上限 4096 字符。
+正文超过 `TELEGRAM_APPROVAL_CARD_MAX_CHARS`（4096）时**直接走文字路径**（现有
+`sendText` 会拆分同一文本），避免每次都先收一个 400 再降级。实测：4500 参数夹具下
+`cardAttempts = 0`、文字提示字节不变、文字「批准」仍可完成审批。
 
 ### 3.5 降级矩阵（不变量 I4：绝不丢审批）
 
@@ -322,6 +349,10 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 | 超时 | 共享队列自动拒绝 → 卡变「⏰ 已过期」清键盘；若编辑失败，超时文字照发 |
 | 非发起人点击 | 只 toast，不 claim、不提交、不改卡 |
 | 同对话又来新审批 | registry 里旧 nonce 标 `superseded`，旧键盘点击只 toast |
+| 正文 > 4096 字符 | 跳过卡片直接发文字（文字发送层拆分），不再产生注定 400 的卡片请求 |
+| 卡片活动时 owner 发普通文字 | 不回复任何「请精准回复…」；按钮仍可点，终态只在卡上出现一次 |
+| 卡片活动时 owner 直接打「批准/拒绝」 | 决策照常提交，卡被原地改成终态，不再额外发终态文字 |
+| 终态卡片编辑失败 | 先尝试用归一后的数字 message id 清死键盘；终态文字照发 |
 
 ### 3.6 改动文件
 
@@ -334,6 +365,7 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 | `src/channels/telegram/telegram-api.mjs` | `editMessageText` 透传 `reply_markup`；富文本+键盘断言（F7 不变量） |
 | `src/channels/telegram/telegram-runtime.mjs` | `TelegramBotClient.editInteractionCard`（含 not-modified 与两步降级）；`updateInteractionCard` 容忍 not-modified |
 | `src/channels/telegram/telegram-bridge.mjs` | 默认装配 `TelegramApprovalCard` |
+| `src/channels/shared/i18n-en/telegram.mjs` | 审批卡英文文案（评审 #3） |
 | `lib/index.js` | 构建产物（host bundle） |
 
 ---
@@ -342,7 +374,7 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 
 | # | 不变量 | 判定方式 | 实测/依据 |
 | --- | --- | --- | --- |
-| I1 | 文字批准/拒绝路径**字节级不变**（提示、终态文案、审批提交结果） | 测试 | `harness-approval.test.mjs` 的 `a card presentation ...` 里用字面量钉死旧提示；`approval-card.test.mjs` 的 fallback 用例断言 `sent[0] === PLAIN_APPROVAL_PROMPT`；原审批 fast-lane 测试全绿 |
+| I1 | 文字批准/拒绝路径**字节级不变**（提示、审批提交结果）；有卡时终态回执由卡片承载、不再重复发聊天消息（评审要求），无卡/卡片失败时文字终态照发 | 测试 | `harness-approval.test.mjs` 的 `a card presentation ...` 用字面量钉死旧提示；`approval-card.test.mjs` 的 fallback 用例断言 `sent[0] === PLAIN_APPROVAL_PROMPT`；`typing 批准 ... keeps a single terminal receipt` 断言有卡时无重复终态文字 |
 | I2 | `callback_data ≤64B` | 测试 | 生成器断言（最宽 token 组合 ≤64）；API 层 64B 抛错单测；实卡 `ap1\|abcd1234EFGH\|a` = 18B |
 | I3 | 非发起人不能处理 | 测试 | `a press by someone else only receives a toast and leaves the card for its owner` |
 | I4 | 重复点只执行一次 | 测试 | `two presses of one card submit the decision exactly once`（ack 延迟 30ms 并发双按） |
@@ -350,6 +382,8 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 | I6 | 发送/编辑失败仍保留文字路径，绝不丢审批 | 测试 | 两条 fallback 用例 + `a failed card edit still delivers the terminal text receipt` |
 | I7 | 飞书/QQ/企微实现零改动 | 人工核对 | `git diff --stat` 不含这些渠道文件；shared bridge 钩子默认 `null` |
 | I8 | 不碰流式/发送预算区域（上游 PR #412/#423/#425/#426） | 人工核对 | `git diff --name-only` 不含 `telegram-runtime` 的流式/发送预算段（改动集中在 `TelegramBotClient` 卡片方法与 `normalizeTelegramCallback` 之外） |
+| I9 | 卡片活动时普通文字不收到与按钮矛盾的「请精准回复…」 | 测试 | `ordinary text while a card is live ...` + harness 单测 `an interactive presentation suppresses ...` |
+| I10 | 卡片文案随宿主语言（en 有英文，其他语言回退中文） | 测试 | `approval card labels follow the host language` |
 
 > `git diff --name-only` 实际清单见 §5。
 > I8 人工核对补充：`telegram-runtime.mjs` 的 diff 只有两处（模块级 `isMessageNotModified` 辅助函数 +
@@ -378,9 +412,9 @@ actor 在 claim **之前**校验：陌生人点击不会消耗发起人的唯一
 | 命令 | 结果 |
 | --- | --- |
 | `node --test test/channels/shared/action-card.test.mjs` | `tests 9 / pass 9 / fail 0` |
-| `node --test test/channels/shared/harness-approval.test.mjs` | `tests 38 / pass 38 / fail 0` |
-| `node --test test/channels/telegram/approval-card.test.mjs` | `tests 14 / pass 14 / fail 0` |
-| scoped 回归（上述 3 个 + `text-harness-bridge` + `interaction-card` + `telegram.test`） | `tests 206 / pass 206 / fail 0` |
+| `node --test test/channels/shared/harness-approval.test.mjs` | 首轮 `38/38` → 评审修复后 `40/40`（新增 2 条契约测试） |
+| `node --test test/channels/telegram/approval-card.test.mjs` | 首轮 `14/14` → 评审修复后 `19/19`（新增 5 条回归测试） |
+| scoped 回归（上述 3 个 + `text-harness-bridge` + `interaction-card` + `telegram.test` + `i18n.test`） | 首轮 `206/206` → 评审修复后 `223/223` |
 | `npm run build` | exit 0（`Wrote lib/client.js`、`Wrote lib/index.js`） |
 | 全量 `npm test` | 见下方「全量验证记录」 |
 
@@ -406,6 +440,38 @@ exit=0
 ```
 
 原始日志已归档：`/home/wings/Code_Project/_notes/tg-approval/full-test.log`（scoped 绿跑：`scoped-final.log`；构建：`build.log`）。
+
+### 5.5 评审修复后的验证（提交 `ff6466e` + `243306d`）
+
+独立评审提出的 3 类问题，全部先写失败测试再修：
+
+```bash
+node --test test/channels/telegram/approval-card.test.mjs \
+  test/channels/shared/harness-approval.test.mjs
+# 修复前：exit=1，tests 59 / pass 52 / fail 7
+# 修复后：exit=0，tests 59 / pass 59 / fail 0
+```
+
+红色明细（测试名 + 断言行，原始日志 `_notes/tg-approval/red-review-fixes.log`）：
+
+| 测试名 | 修复前失败 |
+| --- | --- |
+| a failed terminal card edit still clears the dead keyboard (normalised message id) | `condition was not met before timeout` @ `approval-card.test.mjs:84`（终态 edit 失败后 `updateInteractionCard` 调用数 0） |
+| ordinary text while a card is live neither asks for typing nor duplicates the receipt | `the button card must not answer ordinary text with the type-the-decision prompt` @ `approval-card.test.mjs:638` |
+| typing 批准 and then pressing the card keeps a single terminal receipt | `the card is the terminal receipt; no duplicate chat message` @ `approval-card.test.mjs:666` |
+| an oversized approval body keeps the plain-text flow instead of a doomed card | `condition was not met before timeout` @ `approval-card.test.mjs:84`（4500 字符仍先发卡片） |
+| approval card labels follow the host language | `Expected values to be strictly deep-equal` @ `approval-card.test.mjs:707` |
+| a presentation that delivered the receipt suppresses the duplicate terminal text | `no second terminal text after an interactive receipt` @ `harness-approval.test.mjs:1309` |
+| an interactive presentation suppresses the type-a-reply prompt for ordinary text | `a button card must not ask the user to type the decision` @ `harness-approval.test.mjs:1332` |
+
+修复后 scoped 回归（加跑 `i18n.test.mjs`）：`tests 223 / pass 223 / fail 0`（日志 `_notes/tg-approval/scoped-review-fixes.log`）。
+
+全量 `npm test`（修复后，本分支独立跑）：`tests 4438 / pass 4438 / fail 0`，exit=0，
+duration ≈ 178.6s。原始日志 `_notes/tg-approval/full-test-review-fixes.log`。
+
+> 期间发现并修掉一个自测遗漏：新增英文词典键与既有 `feishu.mjs/shared-c.mjs` 重复，
+> 被 `i18n.test.mjs` 的「no duplicate keys」用例拦下（首轮全量 4437/4438）；
+> 复用既有条目后复跑 `4438/4438` 全绿（提交 `243306d`）。
 
 ### 5.3 构建产物说明
 
@@ -434,6 +500,18 @@ exit=0
  11 files changed, 1945 insertions(+), 355 deletions(-)
 ```
 
+评审修复提交：`ff6466e fix(telegram): 修复审批卡三处真机可见缺陷`
+
+```
+ lib/index.js                                   | 482 ++++++++++++-------------
+ src/channels/shared/harness-approval.mjs       |  15 +-
+ src/channels/shared/i18n-en/telegram.mjs       |  19 +
+ src/channels/telegram/approval-card.mjs        |  39 +-
+ test/channels/shared/harness-approval.test.mjs |  40 ++
+ test/channels/telegram/approval-card.test.mjs  | 118 +++++-
+ 6 files changed, 460 insertions(+), 253 deletions(-)
+```
+
 - 未改飞书/QQ/企微/钉钉等渠道实现文件；
 - 未改包依赖 / `package.json` / `package-lock.json`；
 - 未改流式、发送预算、`editable-message-stream` 区域。
@@ -447,7 +525,28 @@ exit=0
 | 真机未验证 | 本任务禁止调用生产 Telegram bot；A1 的「真机点按钮」由 Lead E2E 阶段补（日志/截图）。单测使用假 Bot API 断言 payload 与状态机。 |
 | 按钮布局 | 两个按钮放同一行（`[✅ 批准一次] [❌ 拒绝]`）。若真机小屏显示拥挤，可改两行——只是 `telegramApprovalMarkup` 一处改动 + 快照断言。 |
 | 「本会话总是允许」 | 本批次只做「批准一次/拒绝」，不加第三个按钮（Harness 当前只消费 `allowed-once`）。 |
-| 卡片正文长度 | 复用 `harnessApprovalText` 的 6000 字符参数上限（超限仍走文字降级，与今天一致）。Telegram 单条消息 4096 字符限制由现有发送层处理；审批参数 6000 上限是共享层既有行为，本批次未改。 |
+| 卡片正文长度 | `harnessApprovalText` 的 6000 字符参数上限不变；正文 >4096 字符时**跳过卡片直接走文字路径**（发卡不能拆分，注定 400；文字发送层会拆分），评审后已实现并有回归测试。 |
+| i18n | 审批卡按钮/终态/toast 已接 `t()` 并补 en 字典；其他语言沿用仓内「未翻译即中文」的回退，未新增翻译。 |
 | 审批卡出现前的旧文字提示 | 旧消息没有按钮，文字「批准/拒绝」路径仍然有效；两种入口共享同一队列，不会双提交。 |
 | 路线图文档 | 按 Lead 协调，本分支**不引入、不修改**路线图与两份调研文档（避免与 `/ws` 分支 add/add 冲突）；批次 1 状态由 Lead 集成时统一更新。本方案文档是本功能独有留痕。 |
 | 需拍板 | ① 真机 E2E 由谁执行（建议 Lead）；② 集成后是否在主检体重跑 `npm run build` 覆盖 `lib/`（推荐，可消除 worktree 软链导致的注释路径差异）；③ 按钮布局（同一行 vs 两行）是否等真机截图后再定。 |
+
+---
+
+## 7. 已知问题与评审修复记录
+
+独立评审结论「可合并」，3 类真机可见缺陷已在 `ff6466e` 修复、i18n 去重跟进在 `243306d`（不改写已有提交）：
+
+| # | 级别 | 问题 | 根因 | 修复 | 状态 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | blocking | 终态卡片编辑失败时死键盘永远不清 | `#retireKeyboard` 用 `Number.isSafeInteger(card.messageId)`，而卡 id 来自 `providerMessageIds` 是 **string**，守卫恒 false | 先 `Number(providerMessageId)` 归一，再校验 `updateInteractionCard`；补回归测试 | ✅ 已修复/已验红 |
+| 2 | blocking | owner 审批挂起时发文字 → 终端重复、普通文字收到「请精准回复…」 | `claimReply` 会把 `pending.send` 换成普通回复的 send；卡片终态后队列仍发文字；非决策文字固定回 prompt | `interactiveCard` 标记（render 成功置位）让队列跳过 prompt；`onResolved` 返回 `true` 时队列跳过 `send(text)`；补 2 条集成 + 2 条队列契约测试 | ✅ 已修复/已验红 |
+| 3a | non-blocking | 正文 >4096 时先发卡片收 400 再降级 | 卡片发送不拆分 | 超过 4096 直接走文字路径 | ✅ 已修复/已验红 |
+| 3b | non-blocking | 按钮/终态/toast 硬编码中文 | 未接 i18n | 全部走 `t()`，补 10 条新英文条目（3 条复用既有） + en 测试；新增键曾与 `feishu.mjs/shared-c.mjs` 重复，被 `i18n.test.mjs` 拦下后去重（`243306d`） | ✅ 已修复/已验红 |
+
+### 仍待真机/集成验证
+
+- A1「真机点按钮」、`editMessageText(reply_markup)` 组合、`message is not modified` 真机行为：
+  官方文档支持，但本任务禁止调用生产 bot，标 `[真机待验证]`，由 Lead E2E 阶段补。
+- 集成时建议在主检出重跑 `npm run build` 覆盖 `lib/`（worktree 软链会导致 `lib/client.js`
+  的注释路径差异，功能提交已还原该文件）。
