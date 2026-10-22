@@ -16,7 +16,7 @@ import { sessionBindErrorMessage } from '../shared/workspace-command.mjs';
  * card is a view of the same snapshot the text list already prints, so:
  *
  *   - the text list stays the fallback for channels without a keyboard, for a
- *     refused card send, and for lists too long to fit a phone screen (> 20);
+ *     refused card send, and for lists too long to fit a phone screen (> 60);
  *   - callbacks carry only `s2|<nonce>|i<index>` / `s2|<nonce>|p<page>`: no
  *     Session ID and no workspace path can ride in the 64-byte budget;
  *   - one nonce registry entry per presentation gives the first press a
@@ -35,9 +35,10 @@ export const TELEGRAM_SESSION_CARD_CALLBACK = createCallbackNamespace(
 export const TELEGRAM_SESSION_CARD_PAGE_SIZE = 10;
 /**
  * Above this a keyboard stops being scannable on a phone. The bridge keeps the
- * text list instead — explicit degradation, never a lost listing.
+ * text list instead — explicit degradation, never a lost listing. Ten rows/page
+ * keeps real workspaces clickable; 60 stays far below the platform button budget.
  */
-export const TELEGRAM_SESSION_CARD_MAX_SESSIONS = 20;
+export const TELEGRAM_SESSION_CARD_MAX_SESSIONS = 60;
 /** Inline-keyboard button text is capped by Telegram; keep the label well under it. */
 const SESSION_BUTTON_LABEL_MAX_CHARS = 64;
 const SESSION_TITLE_MAX_CHARS = 24;

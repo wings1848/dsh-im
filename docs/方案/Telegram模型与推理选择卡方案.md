@@ -9,7 +9,7 @@
   点按即切换并原地更新，失败走既有文字错误语义。
 - `/reasoninglist`（别名 `/reasonings`）、`/reasoning`（不带参数）→ 推理等级选择卡：当前等级 `✓`、
   含「跟随默认」项；模型无推理等级时保留原有的明确文字提示。
-- 文字路径（无卡能力 / 卡片发送失败 / 列表 > 20 项 / 无会话 / 模型无等级 / 原地更新失败）逐字回退，
+- 文字路径（无卡能力 / 卡片发送失败 / 列表 > 60 项 / 无会话 / 模型无等级 / 原地更新失败）逐字回退，
   绝不丢功能。
 
 ## 闸门 1：事实核对
@@ -26,7 +26,7 @@
 | F6 | 卡片渲染/分发接在共享桥的两个既有扩展点：`#processFastCommand`（读命令结果）与 `acceptCallback`（按键） | `rg -n "modelCard|presentModelCard" src/channels/shared/text-harness-bridge.mjs` | `:221/:251/:276` 字段与构造参数；`:1052` `#presentModelCard`；`:1881` `acceptCallback` 的模型卡命名空间分支 |
 | F7 | 只有 Telegram 注入模型卡；其他渠道构造 `TextHarnessBridge` 时不传，行为不变 | `rg -n "modelCard" src/channels --glob '!telegram/**' --glob '!shared/**'` | 空（仅 `telegram-bridge.mjs:140-143` 默认注入；`modelCard: null` 可显式关闭） |
 | F8 | 切换复用文字命令实现：按键重放 `/model <provider>/<model>`、`/reasoning <effort>` / `--default` | `rg -n "runModelCommand\(" src/channels/telegram/model-card.mjs` | `#runCardCommand` 唯一调用点；busy/等待交互/绑定锁/错误文案全部留在 `model-command.mjs` |
-| F9 | 页面容量 8 / 上限 20 是常量且被渲染函数强制 | `rg -n "TELEGRAM_MODEL_CARD_PAGE_SIZE =|TELEGRAM_MODEL_CARD_MAX_ITEMS =" src/channels/telegram/model-card.mjs` | `:46 = 8`、`:48 = 20` |
+| F9 | 页面容量 8 / 上限 60 是常量且被渲染函数强制 | `rg -n "TELEGRAM_MODEL_CARD_PAGE_SIZE =|TELEGRAM_MODEL_CARD_MAX_ITEMS =" src/channels/telegram/model-card.mjs` | `= 8`、`= 60`（真机 32 个模型的 gpd 环境也出卡；2026-10-22 从 20 上调） |
 | F10 | 新增中文 `t()` 字面量都有英文词条（否则共享 i18n 测试变红） | `node --test test/channels/shared/i18n.test.mjs` | `pass 10 fail 0` |
 | F11 | 未改依赖、未碰流式/发送预算区域 | `git diff --stat package.json package-lock.json`；`git diff --stat src/channels/telegram/telegram-runtime.mjs` | 两条均空 |
 | F12 | 既有 `/ws` 卡与审批卡行为不变：它们的命名空间解析保持独立，模型卡在 `acceptCallback` 里只认 `m2\|`/`r2\|` | `node --test test/channels/telegram/workspace-card.test.mjs test/channels/telegram/approval-card.test.mjs test/channels/telegram/interaction-card.test.mjs` | 全绿（见验证记录） |
@@ -47,7 +47,7 @@
 | A8 | 过期卡（TTL）清键盘且不能切换 | 同上（用例 `an expired picker clears its keyboard…`，注入假时钟 registry） | 无 `selectModel`；toast「过期」；旧消息收到空键盘 |
 | A9 | 所有按钮回调 ≤64B、能归属到一次呈现、不含路径/会话/聊天 id | 同上（用例 `every callback payload fits the 64-byte budget…`） | 每个 `callback_data` ≤64 字节、正则 `/\|/` 解析成功、不含 `/` 与 `session-`/`chat-a` |
 | A10 | 卡片发送失败逐字回退原文字列表 | 同上（用例 `a refused card send falls back to the exact text listing`） | 无卡；文字含「可用模型：」「1. deepseek/flash」「切换模型：/model <序号> [推理等级ID]」 |
-| A11 | 列表 > 20 项逐字回退文字列表 | 同上（用例 `a list above the card cap…`） | 21 个模型 → 无卡；文字含「21. deepseek/m21」 |
+| A11 | 列表 > 60 项逐字回退文字列表 | 同上（用例 `a list above the card cap…`） | 21 个模型 → 无卡；文字含「21. deepseek/m21」 |
 | A12 | 无卡能力渠道文字输出字节级不变 | 同上（用例 `a channel without card capability keeps the byte-identical text output`） | `modelCard: null` 时 `sent` 与改造前 `formatCatalog` 输出完全相等（整串 deepEqual） |
 | A13 | 原地刷新失败不静默：清键盘 + 补发原文字回执 | 同上（用例 `a failed in-place refresh delivers the text receipt…`） | `selectModel` 1 次；`sent` 含「模型已切换为：」；toast「无法更新选择卡片」；旧消息空键盘 |
 | A14 | `/reasoninglist`、`/reasonings`、`/reasoning` 都发推理卡；当前等级 ✓、「跟随默认」项存在 | 同上（两个 reasoning 用例） | 卡正文「选择推理等级（共 2 个）」；按钮 `1. Off (off)`、`✓ 2. High (high)`、`跟随默认（由模型决定）` |

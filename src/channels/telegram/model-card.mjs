@@ -44,8 +44,12 @@ import {
 
 /** One button row per entry; eight keeps a phone-sized card scannable. */
 export const TELEGRAM_MODEL_CARD_PAGE_SIZE = 8;
-/** Past this the picker stops being scannable and the text list takes over. */
-export const TELEGRAM_MODEL_CARD_MAX_ITEMS = 20;
+/**
+ * Past this the picker stops being scannable and the text list takes over.
+ * Pagination (8 rows/page) keeps real catalogs clickable; 60 is well below the
+ * platform's tested button budget and covers a 32-model catalog like the GPD box.
+ */
+export const TELEGRAM_MODEL_CARD_MAX_ITEMS = 60;
 export const TELEGRAM_MODEL_CARD_TTL_MS = 60 * 60 * 1000;
 /** Telegram-native cards keep their keyboard for at most this long. */
 const MAX_BUTTON_TEXT = 60;

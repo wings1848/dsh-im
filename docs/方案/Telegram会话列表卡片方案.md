@@ -135,7 +135,7 @@
    - 绑定成功新增 `bound: { workspace, sessionId, title, archived }`（机器可读回执；文字回执不变）。
    - 导出 `sessionBindErrorMessage(error)`：文字命令与卡片共用同一错误映射。
 2. `src/channels/telegram/session-card.mjs`（新增）
-   - `TELEGRAM_SESSION_CARD_PAGE_SIZE = 10`、`TELEGRAM_SESSION_CARD_MAX_SESSIONS = 20`。
+   - `TELEGRAM_SESSION_CARD_PAGE_SIZE = 10`、`TELEGRAM_SESSION_CARD_MAX_SESSIONS = 60`（2026-10-22 从 20 上调，真机按钮预算远大于此）。
    - 命名空间 `s2`（`createCallbackNamespace`），回调 `s2|<nonce>|i<idx>` / `s2|<nonce>|p<page>`。
      共享命名空间强制 3 段且整体 ≤64B；页可由 index/10 推导，故不额外占段。
    - `telegramSessionCardRender(listing, {nonce, page, currentSessionId})`：纯函数；空/>20/坏数据返回 `null`。
