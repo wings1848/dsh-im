@@ -44,4 +44,37 @@ export default {
     'This approval was superseded by a newer prompt; use the latest one.',
   '该审批已失效，请等待新的审批提示。':
     'This approval is no longer valid; wait for a new approval prompt.',
+  // Model / reasoning picker cards (batch 2-A): body text, button labels,
+  // in-place receipts and dead-card notices. Keys match the literals passed
+  // through t() in telegram/model-card.mjs.
+  '选择要使用的模型（共 {count} 个，第 {page}/{pages} 页）':
+    'Choose a model ({count} total, page {page}/{pages})',
+  '推理等级：{effort}': 'Reasoning effort: {effort}',
+  '第 {page}/{pages} 页': 'Page {page}/{pages}',
+  '选择推理等级（共 {count} 个）': 'Choose a reasoning effort ({count} total)',
+  '跟随默认（由模型决定）': 'Follow the default (decided by the model)',
+  '已经是当前模型。': 'This is already the current model.',
+  '已经是当前推理等级。': 'This is already the current reasoning effort.',
+  '模型已切换为：{model}': 'Model switched to: {model}',
+  '推理等级已切换为：{effort}': 'Reasoning effort switched to: {effort}',
+  '已恢复默认推理等级。': 'Restored the default reasoning effort.',
+  '无法切换模型，详情见上方提示。': 'Could not switch the model. See the notice above.',
+  '无法切换推理等级，详情见上方提示。':
+    'Could not switch the reasoning effort. See the notice above.',
+  '无法更新选择卡片，请重新发送命令。':
+    'Could not update the picker. Send the command again.',
+  '已打开推理等级选择。': 'Opened the reasoning effort picker.',
+  '暂时无法打开推理等级列表，请发送 /reasoninglist。':
+    'Could not open the reasoning effort list. Send /reasoninglist.',
+  '这个列表已过期，请重新发送 /models。': 'This list has expired. Send /models again.',
+  '这个列表已过期，请重新发送 /reasoninglist。':
+    'This list has expired. Send /reasoninglist again.',
+  '正在切换，请稍候。': 'Switching, one moment.',
+  '该操作已处理，无需重复操作。': 'This action was already handled. No need to act again.',
+  '该操作已过期，请重新发送命令。': 'This action expired. Send the command again.',
+  '该操作已被新操作取代，请使用最新一张卡片。':
+    'This action was replaced by a newer card; use the latest one.',
+  '该列表已变化，请重新发送命令。': 'This list changed. Send the command again.',
+  '该操作已失效，请重新发送命令。': 'This action is no longer valid. Send the command again.',
+  '该操作已失效或不存在。': 'This action is no longer valid or does not exist.',
 };

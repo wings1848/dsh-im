@@ -3,6 +3,7 @@ import { t } from '../shared/i18n.mjs';
 import { TextHarnessBridge, createTextBridgeStatus } from '../shared/text-harness-bridge.mjs';
 import { workspaceLabels } from '../shared/workspace-labels.mjs';
 import { TelegramApprovalCard } from './approval-card.mjs';
+import { TelegramModelCard } from './model-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
   key: 'telegram',
@@ -136,6 +137,11 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       interactionCard: TELEGRAM_INTERACTION_CARD,
       workspaceCard: TELEGRAM_WORKSPACE_CARD,
       ...options,
+      // Model/reasoning picker cards are on by default; `modelCard: null` keeps
+      // the plain-text /models and /reasoninglist (tests/tools).
+      modelCard: options && Object.hasOwn(options, 'modelCard')
+        ? options.modelCard
+        : new TelegramModelCard({ logger: options?.logger }),
       approvalCard: options && Object.hasOwn(options, 'approvalCard')
         ? options.approvalCard
         : new TelegramApprovalCard({ logger: options?.logger }),

@@ -16,11 +16,18 @@ const SESSION_BINDING_CHANGED = 'session-binding-changed';
 const MODEL_SELECTION_MISMATCH = 'model-selection-mismatch';
 const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
-function commandResult(message) {
+/**
+ * `extra` carries the machine-readable half of a command result (a catalog
+ * snapshot for a channel's picker card, the verified selection after a switch).
+ * It never changes `message`/`messages`, so every text-only channel keeps
+ * byte-identical output.
+ */
+function commandResult(message, extra = {}) {
   return {
     handled: true,
     message,
     messages: splitWorkspaceCommandMessage(message),
+    ...extra,
   };
 }
 
@@ -222,7 +229,7 @@ function effectiveReasoningEffort(current, model) {
   return current?.reasoningEffort ?? model?.reasoning?.defaultEffort;
 }
 
-function reasoningEffortText(model, effortId) {
+export function reasoningEffortText(model, effortId) {
   if (effortId === undefined) return t('Default（由模型或 Provider 决定）');
   const effort = reasoningEffortById(model, effortId);
   if (!effort) return safeDisplayText(effortId);
@@ -231,7 +238,7 @@ function reasoningEffortText(model, effortId) {
   return name === id ? id : `${name} (${id})`;
 }
 
-function currentReasoningEffortText(catalog) {
+export function currentReasoningEffortText(catalog) {
   const model = modelForSelection(catalog, catalog.current);
   return reasoningEffortText(
     model,
@@ -485,11 +492,14 @@ async function selectAndVerifyModel(session, selection, options) {
   if (!confirmsSelection(selected, selection)) {
     throw selectionMismatch(selection, selected, 'selectModel.selected');
   }
-  const current = (await sessionCatalog(session, options)).current;
+  const catalog = await sessionCatalog(session, options);
+  const current = catalog.current;
   if (!sameSelection(current, selected)) {
     throw selectionMismatch(selected, current, 'models.current');
   }
-  return current;
+  // The read-back catalog is what a picker card needs to re-render the new
+  // current model *and* its reasoning metadata after the switch.
+  return { current, catalog };
 }
 
 function isModelsCommand(command) {
@@ -529,7 +539,10 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       const catalog = bound
         ? await sessionCatalog(bound.session, requestOptions)
         : await listCatalog(harness, requestOptions);
-      return commandResult(formatCatalog(catalog));
+      return commandResult(formatCatalog(catalog), {
+        card: 'models',
+        modelCatalog: catalog,
+      });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'list'));
     }
@@ -542,9 +555,11 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
     try {
       const bound = await boundSession(harness, state, key, requestOptions);
       if (!bound) return commandResult(noReasoningSessionMessage());
-      return commandResult(formatReasoningCatalog(
-        await sessionCatalog(bound.session, requestOptions),
-      ));
+      const catalog = await sessionCatalog(bound.session, requestOptions);
+      return commandResult(formatReasoningCatalog(catalog), {
+        card: 'reasoning',
+        reasoningCatalog: catalog,
+      });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'reasoning-list'));
     }
@@ -558,9 +573,11 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       try {
         const bound = await boundSession(harness, state, key, requestOptions);
         if (!bound) return commandResult(noReasoningSessionMessage());
-        return commandResult(currentReasoningMessage(
-          await sessionCatalog(bound.session, requestOptions),
-        ));
+        const catalog = await sessionCatalog(bound.session, requestOptions);
+        return commandResult(currentReasoningMessage(catalog), {
+          card: 'reasoning',
+          reasoningCatalog: catalog,
+        });
       } catch (error) {
         return commandResult(modelErrorMessage(error, 'reasoning-list'));
       }
@@ -610,7 +627,8 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
           model: current.model,
           ...(effort === undefined ? {} : { reasoningEffort: effort }),
         };
-        const applied = await selectAndVerifyModel(bound.session, selection, requestOptions);
+        const verified = await selectAndVerifyModel(bound.session, selection, requestOptions);
+        const applied = verified.current;
         assertSessionBinding(state, key, bound.sessionId);
         return commandResult(t(`推理等级已切换为：
 {effort}
@@ -622,7 +640,10 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
             model,
             effectiveReasoningEffort(applied, model),
           ),
-        }));
+        }), {
+          selection: applied,
+          modelCatalog: verified.catalog,
+        });
       });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'reasoning-select'));
@@ -638,7 +659,10 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
       const bound = await boundSession(harness, state, key, requestOptions);
       if (!bound) return commandResult(noSessionMessage());
       const catalog = await sessionCatalog(bound.session, requestOptions);
-      return commandResult(currentModelMessage(catalog));
+      return commandResult(currentModelMessage(catalog), {
+        card: 'models',
+        modelCatalog: catalog,
+      });
     } catch (error) {
       return commandResult(modelErrorMessage(error, 'select'));
     }
@@ -693,9 +717,9 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
         selection.reasoningEffort = effort.id;
       }
 
-      let applied;
+      let verified;
       if (bound) {
-        applied = await selectAndVerifyModel(bound.session, selection, requestOptions);
+        verified = await selectAndVerifyModel(bound.session, selection, requestOptions);
         assertSessionBinding(state, key, bound.sessionId);
       } else {
         if (typeof harness?.createSession !== 'function'
@@ -712,7 +736,7 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
           throw new TypeError('Harness returned an invalid session id');
         }
         const session = harness.workspaceSession(sessionId, key);
-        applied = await selectAndVerifyModel(session, selection, requestOptions);
+        verified = await selectAndVerifyModel(session, selection, requestOptions);
         const currentSessionId = state.sessionFor(key);
         if (typeof currentSessionId === 'string' && currentSessionId) {
           throw sessionBindingChanged();
@@ -723,6 +747,7 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
           throw stale;
         }
       }
+      const applied = verified.current;
       return commandResult(t(`模型已切换为：
 {model}
 推理等级：{effort}
@@ -733,7 +758,10 @@ export async function runModelCommand(text, harness, state, key, options = {}) {
           targetModel,
           effectiveReasoningEffort(applied, targetModel),
         ),
-      }));
+      }), {
+        selection: applied,
+        modelCatalog: verified.catalog,
+      });
     });
   } catch (error) {
     return commandResult(modelErrorMessage(error, 'select'));
