@@ -1007,3 +1007,80 @@ test(`model command failures use safe user-facing messages for ${code}`, async (
 test('non-model input is left for ordinary message routing', async () => {
   assert.equal(await runModelCommand('hello', {}, {}, 'direct:one'), null);
 });
+
+test('read-only model commands expose the picker snapshot their text is built from', async () => {
+  const catalog = {
+    ...CATALOG,
+    current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    routable: true,
+  };
+  const bound = fixture({ initialSessionId: 'session-one', sessionCatalog: catalog });
+
+  const listed = await runModelCommand('/models', bound.harness, bound.state, 'direct:one');
+  assert.equal(listed.card, 'models');
+  // The snapshot is the normalized catalog the text listing is rendered from.
+  assert.deepEqual(listed.modelCatalog, {
+    groups: catalog.groups,
+    failures: [],
+    current: catalog.current,
+  });
+  // The text receipt is exactly the pre-card listing; the snapshot is a sibling.
+  assert.match(listed.message, /1\. deepseek-official\/deepseek-v4-flash（当前）/);
+  assert.equal(listed.messages.join(''), listed.message);
+
+  const current = await runModelCommand('/model', bound.harness, bound.state, 'direct:one');
+  assert.equal(current.card, 'models');
+  assert.deepEqual(current.modelCatalog, {
+    groups: catalog.groups,
+    failures: [],
+    current: catalog.current,
+  });
+  assert.match(current.message, /当前模型：/);
+
+  const reasoningCatalog = reasoningSessionCatalog();
+  const reasoningReader = fixture({
+    initialSessionId: 'session-one',
+    sessionCatalog: reasoningCatalog,
+  });
+  for (const command of ['/reasoninglist', '/reasonings', '/reasoning']) {
+    const read = await runModelCommand(command, reasoningReader.harness, reasoningReader.state, 'direct:one');
+    assert.equal(read.card, 'reasoning', command);
+    assert.deepEqual(read.reasoningCatalog, {
+      groups: reasoningCatalog.groups,
+      failures: [],
+      current: reasoningCatalog.current,
+    }, command);
+    assert.equal(read.messages.join(''), read.message, command);
+  }
+});
+
+test('a confirmed switch exposes the verified selection and refreshed catalog to pickers', async () => {
+  const bound = fixture({ initialSessionId: 'session-one' });
+  const switched = await runModelCommand(
+    '/model deepseek-official/deepseek-v4-pro',
+    bound.harness,
+    bound.state,
+    'direct:one',
+  );
+  assert.deepEqual(switched.selection, {
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-pro',
+  });
+  assert.equal(switched.modelCatalog.current.provider, 'deepseek-official');
+  assert.equal(switched.modelCatalog.current.model, 'deepseek-v4-pro');
+  // The text receipt remains the same as before the structured fields existed.
+  assert.match(switched.message, /^模型已切换为：/);
+
+  const reasoning = fixture({
+    initialSessionId: 'session-one',
+    sessionCatalog: reasoningSessionCatalog(),
+  });
+  const effort = await runModelCommand('/reasoning off', reasoning.harness, reasoning.state, 'direct:one');
+  assert.deepEqual(effort.selection, {
+    provider: 'deepseek-official',
+    model: 'deepseek-v4-flash',
+    reasoningEffort: 'off',
+  });
+  assert.equal(effort.modelCatalog.current.reasoningEffort, 'off');
+  assert.match(effort.message, /^推理等级已切换为：/);
+});
