@@ -39,6 +39,17 @@ export const TELEGRAM_SESSION_CARD_PAGE_SIZE = 10;
  * keeps real workspaces clickable; 60 stays far below the platform button budget.
  */
 export const TELEGRAM_SESSION_CARD_MAX_SESSIONS = 60;
+/**
+ * How many presentations this card remembers.
+ *
+ * `issue()` retires the previous card of the same conversation, so at most one
+ * entry per conversation is live — this ceiling therefore bounds *conversations*,
+ * not presses. 64 concurrent chats is far beyond a single bot's realistic load,
+ * and unlike the registry default (256) it keeps the worst case small: each entry
+ * holds a full session listing (up to 60 rows), so the default would spend a few
+ * MB remembering cards nobody can press any more.
+ */
+const TELEGRAM_SESSION_CARD_MAX_RECORDS = 64;
 /** Inline-keyboard button text is capped by Telegram; keep the label well under it. */
 const SESSION_BUTTON_LABEL_MAX_CHARS = 64;
 const SESSION_TITLE_MAX_CHARS = 24;
@@ -301,7 +312,7 @@ export class TelegramSessionCard {
   } = {}) {
     this.#registry = registry instanceof ActionCardRegistry
       ? registry
-      : new ActionCardRegistry({ ttlMs });
+      : new ActionCardRegistry({ ttlMs, maxEntries: TELEGRAM_SESSION_CARD_MAX_RECORDS });
     this.#logger = logger;
     this.#notices = {
       ...DEFAULT_STATE_TEXT_OVERRIDES,
