@@ -238,11 +238,11 @@ export function telegramSessionCardRender(listing, {
         callback_data: telegramSessionPageCallbackData(nonce, safePage - 1),
       });
     }
-    // The page number is a no-op button: pressing it only gets "already here",
-    // so the layout stays stable without offering a dead-looking blank cell.
+    // The page indicator is a label, not an action: Bot API 10.3 `disabled`
+    // keeps the layout stable without a button that only says "already here".
     pager.push({
       text: t('第 {page}/{pageCount} 页', { page: safePage + 1, pageCount }),
-      callback_data: telegramSessionPageCallbackData(nonce, safePage),
+      disabled: {},
     });
     if (safePage + 1 < pageCount) {
       pager.push({

@@ -77,6 +77,20 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.UNKNOWN]: '该操作已失效或不存在。',
 });
 
+/**
+ * A labelled row that is not an action.
+ *
+ * Bot API 10.3 added `InlineKeyboardButton.disabled` (a `DisabledButton`): the
+ * client renders it greyed and never sends a callback. Group headers, page
+ * indicators and the already-selected row use it instead of a no-op callback, so
+ * a press can no longer "succeed" by answering "already the current model".
+ *
+ * `selected` adds the ✓ prefix convention; the field itself carries no data.
+ */
+function labelButton(text) {
+  return { text, disabled: {} };
+}
+
 function displayText(value) {
   if (typeof value !== 'string') return '';
   return value.replace(UNSAFE_DISPLAY_TEXT_GLOBAL, ' ').replace(/\s+/gu, ' ').trim();
@@ -187,17 +201,19 @@ export function renderModelCard(view, nonce) {
   for (const item of view.pageItems) {
     if (item.groupId !== groupId) {
       groupId = item.groupId;
-      // A provider header is a label, not an action: it always answers a no-op.
-      rows.push([{
-        text: truncateButtonText(item.groupName),
-        callback_data: callback('h'),
-      }]);
+      // A provider header is a label, not an action: Bot API 10.3 gives labels a
+      // real representation (disabled), so it stops being a button that lies.
+      rows.push([labelButton(truncateButtonText(item.groupName))]);
     }
     const isCurrent = view.currentId === `${item.provider}/${item.model}`;
-    rows.push([{
-      text: truncateButtonText(`${isCurrent ? '✓ ' : ''}${item.index}. ${item.label}`),
-      callback_data: callback(isCurrent ? 'c' : String(item.index)),
-    }]);
+    // Only the already-selected row is a label; every other row must stay a real
+    // button or the picker cannot switch anything.
+    rows.push([isCurrent
+      ? labelButton(truncateButtonText(`✓ ${item.index}. ${item.label}`), true)
+      : {
+        text: truncateButtonText(`${item.index}. ${item.label}`),
+        callback_data: callback(String(item.index)),
+      }]);
   }
   if (view.currentMeta?.reasoning) {
     rows.push([{
@@ -209,18 +225,14 @@ export function renderModelCard(view, nonce) {
   }
   if (view.pages > 1) {
     rows.push([
-      {
-        text: t('上一页'),
-        callback_data: callback(view.page > 0 ? `p${view.page - 1}` : 'h'),
-      },
-      {
-        text: t('第 {page}/{pages} 页', { page: view.page + 1, pages: view.pages }),
-        callback_data: callback('h'),
-      },
-      {
-        text: t('下一页'),
-        callback_data: callback(view.page < view.pages - 1 ? `p${view.page + 1}` : 'h'),
-      },
+      // The pager edges are only buttons when there is somewhere to go.
+      view.page > 0
+        ? { text: t('上一页'), callback_data: callback(`p${view.page - 1}`) }
+        : labelButton(t('上一页')),
+      labelButton(t('第 {page}/{pages} 页', { page: view.page + 1, pages: view.pages })),
+      view.page < view.pages - 1
+        ? { text: t('下一页'), callback_data: callback(`p${view.page + 1}`) }
+        : labelButton(t('下一页')),
     ]);
   }
   return { text: view.text, markup: { inline_keyboard: rows } };

@@ -130,11 +130,13 @@ export function presetCardView(catalog) {
 /** Paint one preset card. Every button is attributable to this presentation. */
 export function renderPresetCard(view, nonce) {
   const callback = (action) => TELEGRAM_PRESET_CARD_CALLBACK.encode({ nonce, action });
-  const rows = view.items.map((item) => [{
-    text: truncateButtonText(`${item.current ? '✓ ' : ''}${item.index}. ${item.label}`),
-    // The already-selected row is a label, not an action.
-    callback_data: callback(item.current && view.currentId ? 'c' : `i${item.index}`),
-  }]);
+  const rows = view.items.map((item) => {
+    const text = truncateButtonText(`${item.current ? '✓ ' : ''}${item.index}. ${item.label}`);
+    // The already-selected row is a label: Bot API 10.3 `disabled` makes it
+    // genuinely unpressable instead of a button that answers "already current".
+    if (item.current && view.currentId) return [{ text, disabled: {} }];
+    return [{ text, callback_data: callback(`i${item.index}`) }];
+  });
   rows.push([{
     text: truncateButtonText(t('跟随 Host 默认')),
     callback_data: callback(FOLLOW_DEFAULT_ACTION),

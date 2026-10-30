@@ -230,18 +230,30 @@ function buttons(card) {
   return rows(card).flat();
 }
 
+/** A pressed-able button: disabled labels have no callback_data by design. */
 function button(card, pattern) {
-  const found = buttons(card).find((entry) => pattern.test(entry.text));
+  const found = buttons(card).find((entry) => pattern.test(entry.text)
+    && typeof entry.callback_data === 'string');
   assert.ok(found, `no delivered button matching ${pattern}: ${buttons(card).map((b) => b.text).join(' | ')}`);
   return found;
+}
+
+/** The label row whose text matches (group headers, page numbers, current row). */
+function label(card, pattern) {
+  return buttons(card).find((entry) => pattern.test(entry.text));
 }
 
 function labels(card) {
   return rows(card).map((row) => row.map((entry) => entry.text));
 }
 
+/** Only pressable buttons carry a callback; labels are `disabled` by design. */
+function pressable(card) {
+  return buttons(card).filter((entry) => typeof entry.callback_data === 'string');
+}
+
 function parseActions(card) {
-  return buttons(card).map((entry) => parseTelegramModelCardCallback(entry.callback_data));
+  return pressable(card).map((entry) => parseTelegramModelCardCallback(entry.callback_data));
 }
 
 /* ---------------------------------------------------------------------------
@@ -310,8 +322,9 @@ test('a list longer than one page paginates; a page press repaints the same mess
   assert.ok(!secondLabels.includes('2. Model 2'), 'page one models are gone');
   const secondNav = rows(second).at(-1);
   assert.deepEqual(secondNav.map((entry) => entry.text), ['上一页', '第 2/2 页', '下一页']);
-  assert.equal(parseTelegramModelCardCallback(secondNav.at(-1).callback_data).action, 'h',
-    'the last page renders a no-op next button');
+  // The last page has nowhere to go, so 下一页 is a real disabled label rather
+  // than a button that answers a pointless "h".
+  assert.deepEqual(secondNav.at(-1), { text: '下一页', disabled: {} });
 
   // The page flip re-presents the card with a fresh nonce, so a stale page-one
   // button is dead and must not switch anything.
@@ -364,14 +377,16 @@ test('a double press while the switch is in flight performs exactly one switch',
   assert.equal(fixture.edits.length, 1);
 });
 
-test('pressing the current model is a no-op receipt', async () => {
+test('the current model is a disabled button, not a pressable no-op', async () => {
   const fixture = bridgeFixture();
   await fixture.bridge.accept(message('/models'));
-  const current = button(fixture.cards[0], /^✓ 1\. Flash$/);
-  await press(fixture.bridge, current.callback_data);
+  const current = label(fixture.cards[0], /^✓ 1\. Flash$/);
+  // Bot API 10.3: labels carry `disabled` and no callback_data, so the client
+  // never sends a callback — there is nothing to answer or switch.
+  assert.equal(current.callback_data, undefined);
+  assert.deepEqual(current.disabled, {});
   assert.deepEqual(fixture.selectModelCalls, []);
   assert.equal(fixture.edits.length, 0);
-  assert.match(fixture.notices.at(-1).text, /已经是当前模型/);
 });
 
 test('a newer picker retires the previous keyboard; the old press cannot switch', async () => {
@@ -417,7 +432,8 @@ test('every callback payload fits the 64-byte budget and carries no path or id',
   await fixture.bridge.accept(message('/reasoninglist'));
   assert.equal(fixture.cards.length, 2);
   for (const card of fixture.cards) {
-    for (const entry of buttons(card)) {
+    // Labels are `disabled` (Bot API 10.3) and carry no callback at all.
+    for (const entry of pressable(card)) {
       assert.ok(Buffer.byteLength(entry.callback_data, 'utf8') <= 64, entry.callback_data);
       assert.doesNotMatch(entry.callback_data, /\/|session-|chat-a/u,
         'paths, session ids and chat ids never ride in a callback');

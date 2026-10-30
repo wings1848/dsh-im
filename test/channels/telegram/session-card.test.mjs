@@ -238,17 +238,18 @@ test('long lists paginate ten per page and page presses edit the same card in pl
   assert.deepEqual(secondKeyboard.at(-2).map((button) => button.text), ['◀ 上一页', '第 2/2 页']);
 });
 
-test('pressing the page indicator is an idempotent receipt and keeps the card alive', async () => {
-  const { bridge, cards, edits, binds, notices } = bridgeFixture({
+test('the page indicator is a disabled label, not a pressable no-op', async () => {
+  const { bridge, cards, edits, binds } = bridgeFixture({
     sessions: sessionsFixture(TELEGRAM_SESSION_CARD_PAGE_SIZE + 1),
   });
   await bridge.accept(message('/sessionlist'));
   const indicator = cards[0].markup.inline_keyboard.at(-2)[0];
   assert.equal(indicator.text, '第 1/2 页');
-  await press(bridge, indicator.callback_data);
-  assert.equal(edits.length, 0, 'no edit for a no-op page press');
+  // Bot API 10.3: no callback_data means the client sends nothing at all.
+  assert.equal(indicator.callback_data, undefined);
+  assert.deepEqual(indicator.disabled, {});
+  assert.equal(edits.length, 0);
   assert.equal(binds.length, 0);
-  assert.match(notices.at(-1).text, /已经是第 1 页/);
 });
 
 test('pressing a session binds it, moves ✓ in place and returns a receipt', async () => {
@@ -351,7 +352,8 @@ test('callback payloads stay within 64 bytes and carry no session ID or workspac
   await bridge.accept(message('/sessionlist'));
 
   const parsedKinds = new Set();
-  for (const button of buttons(cards[0])) {
+  // Labels (`disabled`) carry no callback at all, so they are not part of this.
+  for (const button of buttons(cards[0]).filter((entry) => typeof entry.callback_data === 'string')) {
     const bytes = Buffer.byteLength(button.callback_data, 'utf8');
     assert.ok(bytes <= 64, `callback_data is ${bytes} bytes: ${button.callback_data}`);
     assert.ok(!button.callback_data.includes(WORKSPACE), 'workspace path stays out of callbacks');

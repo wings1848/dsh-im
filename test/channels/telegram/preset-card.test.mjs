@@ -168,13 +168,16 @@ test('every button is attributable to this presentation and fits the callback bu
   const card = renderPresetCard(view, 'abcd1234EFGH');
   const rows = card.markup.inline_keyboard;
   assert.equal(rows.length, 4, 'three presets plus the follow-default row');
-  const payloads = rows.flat().map((button) => button.callback_data);
+  // Labels are `disabled` (Bot API 10.3) and carry no callback at all.
+  const pressable = rows.flat().filter((button) => typeof button.callback_data === 'string');
+  const payloads = pressable.map((button) => button.callback_data);
   for (const payload of payloads) {
     assert.ok(Buffer.byteLength(payload, 'utf8') <= 64, payload);
     assert.match(payload, /^p1\|abcd1234EFGH\|/u);
   }
-  // The current row is a label: pressing it must not claim the card.
-  assert.equal(payloads[1].split('|').at(-1), 'c');
+  // The current row is a real label: no callback, so a press cannot claim it.
+  const currentRow = rows.flat().find((button) => button.text.startsWith('✓ '));
+  assert.deepEqual(currentRow, { text: '✓ 2. 营销预设', disabled: {} });
   assert.deepEqual(parseTelegramPresetCardCallback(payloads[0]), {
     kind: 'preset',
     nonce: 'abcd1234EFGH',
