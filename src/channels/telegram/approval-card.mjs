@@ -40,6 +40,8 @@ const ACTION_BY_DECISION = Object.freeze({
   approve: TELEGRAM_APPROVAL_ACTIONS.approve,
   reject: TELEGRAM_APPROVAL_ACTIONS.reject,
 });
+/** Callback action that opens the full (unfolded) argument text. */
+const DETAILS_ACTION = 'v';
 const DECISION_BY_ACTION = Object.freeze({
   [TELEGRAM_APPROVAL_ACTIONS.approve]: 'approve',
   [TELEGRAM_APPROVAL_ACTIONS.reject]: 'reject',
@@ -47,6 +49,7 @@ const DECISION_BY_ACTION = Object.freeze({
 const BUTTON_TEXT = Object.freeze({
   approve: '✅ 批准一次',
   reject: '❌ 拒绝',
+  details: '📄 查看完整参数',
 });
 /** The card body keeps the tool/argument summary; the buttons replace the prompt. */
 const TERMINAL_LABEL = Object.freeze({
@@ -57,6 +60,66 @@ const TERMINAL_LABEL = Object.freeze({
 });
 /** Telegram rejects a single message body over this many characters. */
 export const TELEGRAM_APPROVAL_CARD_MAX_CHARS = 4_096;
+
+/**
+ * Above this many characters of tool arguments the card shows a folded summary
+ * plus a 「查看完整参数」 button, instead of either a wall of text or (worse)
+ * handing the body to a path that silently drops it.
+ *
+ * The fold is presentation only: approving never happens on a body the user
+ * cannot reach, because the button opens the exact same text in full.
+ */
+export const TELEGRAM_APPROVAL_FOLD_ARGUMENTS_CHARS = 900;
+/** Lines kept when folding; enough to recognize the operation at a glance. */
+export const TELEGRAM_APPROVAL_FOLD_LINES = 12;
+const FOLD_NOTICE = '参数较长，已折叠；点「📄 查看完整参数」看全文后再决定。';
+
+/**
+ * Fold the argument block of an approval body, keeping the header and reason.
+ *
+ * Returns `{ text, folded, fullText }`:
+ *   - `text` is what the card shows (with a notice saying it was folded);
+ *   - `fullText` is the untouched body, which the button delivers verbatim.
+ */
+export function foldApprovalCardText(text) {
+  const value = typeof text === 'string' ? text : '';
+  if (value.length <= TELEGRAM_APPROVAL_FOLD_ARGUMENTS_CHARS) {
+    return { text: value, folded: false, fullText: value };
+  }
+  const lines = value.split('\n');
+  // Find the argument block: it starts right after the 操作参数 line and runs
+  // until the optional 原因 line or the end. Other channels print the same
+  // structure, so this anchors on the localized marker only.
+  const marker = t('操作参数：');
+  const start = lines.indexOf(marker);
+  if (start === -1 || lines.length <= TELEGRAM_APPROVAL_FOLD_LINES) {
+    // Nothing safely recognizable to fold: keep it whole and let the caller's
+    // size check decide (it either fits or falls back to the text path).
+    return { text: value, folded: false, fullText: value };
+  }
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (lines[index].startsWith(t('原因：'))) {
+      end = index;
+      break;
+    }
+  }
+  const body = lines.slice(start + 1, end);
+  if (body.length <= TELEGRAM_APPROVAL_FOLD_LINES) {
+    return { text: value, folded: false, fullText: value };
+  }
+  const kept = body.slice(0, TELEGRAM_APPROVAL_FOLD_LINES);
+  const hidden = body.length - kept.length;
+  const folded = [
+    ...lines.slice(0, start + 1),
+    ...kept,
+    t('…（其余 {count} 行已折叠）', { count: hidden }),
+    ...lines.slice(end),
+    '',
+    t(FOLD_NOTICE),
+  ].join('\n');
+  return { text: folded, folded: true, fullText: value };
+}
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 const TERMINAL_STATUS_BY_OUTCOME = Object.freeze({
   'allowed-once': ACTION_CARD_STATUS.RESOLVED,
@@ -88,25 +151,37 @@ export function telegramApprovalCallbackData(nonce, decision) {
 export function parseTelegramApprovalCallback(data) {
   const parsed = TELEGRAM_APPROVAL_CALLBACK.parse(data);
   if (!parsed) return null;
+  // `v` opens the unfolded arguments; it is not a decision and must never be
+  // mistaken for one.
+  if (parsed.action === DETAILS_ACTION) {
+    return { nonce: parsed.nonce, action: 'details' };
+  }
   const decision = DECISION_BY_ACTION[parsed.action];
   if (!decision) return null;
   return { nonce: parsed.nonce, action: decision };
 }
 
 /** The two-button keyboard for one presentation. */
-export function telegramApprovalMarkup(nonce) {
-  return {
-    inline_keyboard: [[
-      {
-        text: t(BUTTON_TEXT.approve),
-        callback_data: telegramApprovalCallbackData(nonce, 'approve'),
-      },
-      {
-        text: t(BUTTON_TEXT.reject),
-        callback_data: telegramApprovalCallbackData(nonce, 'reject'),
-      },
-    ]],
-  };
+export function telegramApprovalMarkup(nonce, { folded = false } = {}) {
+  const rows = [];
+  // The details row comes first: read the whole thing, then decide.
+  if (folded) {
+    rows.push([{
+      text: t(BUTTON_TEXT.details),
+      callback_data: TELEGRAM_APPROVAL_CALLBACK.encode({ nonce, action: 'v' }),
+    }]);
+  }
+  rows.push([
+    {
+      text: t(BUTTON_TEXT.approve),
+      callback_data: telegramApprovalCallbackData(nonce, 'approve'),
+    },
+    {
+      text: t(BUTTON_TEXT.reject),
+      callback_data: telegramApprovalCallbackData(nonce, 'reject'),
+    },
+  ]);
+  return { inline_keyboard: rows };
 }
 
 /**
@@ -187,7 +262,11 @@ export class TelegramApprovalCard {
     return {
       send: guardedSend,
       render: async (pending) => {
-        const text = telegramApprovalCardText(pending);
+        // A long argument block is folded, not truncated: the card shows a
+        // recognizable summary and a 「查看完整参数」 button that delivers the
+        // exact original text. Approving never happens sight-unseen.
+        const folded = foldApprovalCardText(telegramApprovalCardText(pending));
+        const text = folded.text;
         // sendInteractionCard cannot split a body, and sendMessage rejects
         // anything over 4096 characters. A body that big keeps the text path,
         // which splits the same bytes instead of logging a doomed 400.
@@ -202,18 +281,25 @@ export class TelegramApprovalCard {
         const entry = this.#registry.issue({
           conversationKey: key,
           kind: 'approval',
-          payload: { approvalId: pending.approvalId, actor },
+          // `fullText` rides in the payload so the details button can deliver the
+          // unfolded body without a second render (and without an extra RPC).
+          payload: {
+            approvalId: pending.approvalId,
+            actor,
+            fullText: folded.folded ? folded.fullText : null,
+          },
         });
         try {
           const sent = await bot.sendInteractionCard(target, {
             text,
-            markup: telegramApprovalMarkup(entry.nonce),
+            markup: telegramApprovalMarkup(entry.nonce, { folded: folded.folded }),
           });
           card = {
             nonce: entry.nonce,
             approvalId: pending.approvalId,
             messageId: sent?.providerMessageIds?.at(-1) ?? null,
             text,
+            fullText: folded.fullText,
           };
           // The card now owns the decision guidance and the terminal receipt.
           pending.interactiveCard = true;
@@ -274,6 +360,23 @@ export class TelegramApprovalCard {
       && typeof entry.payload?.actor === 'string'
       && entry.payload.actor !== senderId) {
       await answer?.(t(APPROVAL_CARD_NOTICES.ownerOnly));
+      return true;
+    }
+
+    // 查看完整参数 must not claim the card: reading the details is the whole
+    // point of the fold, and the user still has to decide afterwards.
+    if (parsed.action === 'details') {
+      if (!entry || entry.status === ACTION_CARD_STATUS.UNKNOWN) {
+        await answer?.(actionCardStateText(ACTION_CARD_STATUS.UNKNOWN, this.#notices));
+        return true;
+      }
+      const full = typeof entry.payload?.fullText === 'string' ? entry.payload.fullText : '';
+      if (full && typeof bot?.sendText === 'function') {
+        await answer?.(t('已发送完整参数。'));
+        await bot.sendText(callback?.replyTarget, full);
+      } else {
+        await answer?.(t('暂时无法展开完整参数，请到 Web 端查看。'));
+      }
       return true;
     }
 

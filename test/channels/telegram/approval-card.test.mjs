@@ -8,6 +8,8 @@ import {
   TelegramHarnessBridge,
 } from '../../../src/channels/telegram/telegram-bridge.mjs';
 import {
+  TELEGRAM_APPROVAL_FOLD_ARGUMENTS_CHARS,
+  foldApprovalCardText,
   parseTelegramApprovalCallback,
   telegramApprovalCallbackData,
 } from '../../../src/channels/telegram/approval-card.mjs';
@@ -720,4 +722,70 @@ test('approval card labels follow the host language', async () => {
   } finally {
     setImHostLanguage('zh');
   }
+});
+
+// ── long arguments are folded, never truncated ───────────────────────────────
+
+test('a short body is not folded at all', () => {
+  const folded = foldApprovalCardText('短正文\n操作参数：\n{"a":1}');
+  assert.equal(folded.folded, false);
+  assert.equal(folded.text, folded.fullText);
+});
+
+test('a long argument block folds with a visible count of what is hidden', () => {
+  const args = Array.from({ length: 80 }, (_, index) => `  "key${index}": "value-${index}-padding-padding-padding",`).join('\n');
+  const body = `DeepSeek Harness 需要你的审批：\n\n工具：bash\n操作参数：\n${args}`;
+  const folded = foldApprovalCardText(body);
+  assert.equal(folded.folded, true);
+  assert.match(folded.text, /其余 \d+ 行已折叠/u);
+  assert.match(folded.text, /查看完整参数/u);
+  assert.match(folded.text, /工具：bash/u, 'the tool line survives the fold');
+  // The full text is kept verbatim so the button can deliver it.
+  assert.equal(folded.fullText, body);
+  assert.ok(!folded.text.includes('"key79"'), 'the tail really is hidden');
+});
+
+test('folding keeps the reason line, which explains why approval was asked', () => {
+  const args = Array.from({ length: 80 }, (_, index) => `  "key${index}": "value-${index}-padding-padding-padding",`).join('\n');
+  const body = `审批：\n工具：bash\n操作参数：\n${args}\n原因：需要清理临时文件`;
+  const folded = foldApprovalCardText(body);
+  assert.equal(folded.folded, true);
+  assert.match(folded.text, /原因：需要清理临时文件/u);
+});
+
+test('a body too long to size-check still refuses to fold blindly', () => {
+  // No recognizable 操作参数 marker: return unchanged rather than guess.
+  const body = 'x'.repeat(TELEGRAM_APPROVAL_FOLD_ARGUMENTS_CHARS + 100);
+  const folded = foldApprovalCardText(body);
+  assert.equal(folded.folded, false);
+  assert.equal(folded.text, body);
+});
+
+test('a long-argument approval shows a details button and still decides normally', async () => {
+  // A realistic multi-line argument object: many keys, several lines each.
+  const longArgs = JSON.stringify(Object.fromEntries(Array.from(
+    { length: 40 },
+    (_, index) => [`key${index}`, { step: index, text: `padding-padding-${index}` }],
+  )));
+  const { bridge, controller, env } = bridgeFixture({ argumentsText: longArgs });
+  const processing = bridge.accept(message('m-long', '启动审批'));
+  await eventually(() => env.cards.length === 1);
+
+  const rows = env.cards[0].markup.inline_keyboard;
+  assert.equal(rows.length, 2, 'a details row plus the decision row');
+  assert.match(rows[0][0].text, /查看完整参数/u);
+  assert.match(env.cards[0].text, /其余 \d+ 行已折叠/u);
+
+  // The details button opens the full body and does NOT consume the decision.
+  await bridge.acceptCallback(callback({ data: rows[0][0].callback_data, callbackQueryId: 'cb-details' }));
+  await eventually(() => env.sent.some((text) => text.includes('padding-padding-39')));
+  assert.equal(env.submissions.length, 0, 'reading the details decides nothing');
+  assert.equal(env.edits.length, 0, 'the card is left alone');
+
+  // The decision still works afterwards.
+  await bridge.acceptCallback(callback({ data: env.cards[0].markup.inline_keyboard[1][0].callback_data }));
+  await eventually(() => env.submissions.length === 1);
+  assert.equal(env.submissions[0].value.outcome, 'allowed-once');
+
+  await stopFixture(controller, processing);
 });

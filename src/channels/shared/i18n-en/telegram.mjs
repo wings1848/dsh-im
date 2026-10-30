@@ -172,4 +172,11 @@ export default {
   '这个状态卡已失效或不存在。': 'This status card is no longer valid or does not exist.',
   '已刷新。': 'Refreshed.',
   '刷新失败，请发送 /status。': 'Refresh failed; send /status.',
+  // Approval card long-argument fold (P1-6).
+  '原因：': 'Reason: ',
+  '…（其余 {count} 行已折叠）': '… ({count} more lines folded)',
+  '已发送完整参数。': 'Sent the full parameters.',
+  '暂时无法展开完整参数，请到 Web 端查看。': 'Cannot unfold the full parameters right now; check the Web interface.',
+  '参数较长，已折叠；点「📄 查看完整参数」看全文后再决定。': 'The parameters are long, so they were folded; open the full text before deciding.',
+  '📄 查看完整参数': '📄 Show full parameters',
 };
