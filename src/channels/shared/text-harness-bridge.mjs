@@ -219,6 +219,7 @@ export class TextHarnessBridge {
   #presetCard;
   #menuCard;
   #helpCard;
+  #statusCard;
   #clearCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
@@ -258,6 +259,7 @@ export class TextHarnessBridge {
     presetCard = null,
     menuCard = null,
     helpCard = null,
+    statusCard = null,
     clearCard = null,
     sessionCard = null,
     approvalCard = null,
@@ -288,6 +290,7 @@ export class TextHarnessBridge {
     this.#presetCard = presetCard ?? null;
     this.#menuCard = menuCard ?? null;
     this.#helpCard = helpCard ?? null;
+    this.#statusCard = statusCard ?? null;
     this.#clearCard = clearCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
@@ -1236,6 +1239,50 @@ export class TextHarnessBridge {
    * exact text help instead, so `/help` keeps its pinned output on every channel
    * that cannot show a keyboard.
    */
+  /** Read the current /status snapshot without sending anything. */
+  async #readStatusSnapshot(conversationKey) {
+    try {
+      const status = await runStatusCommand({
+        descriptor: this.#descriptor,
+        harness: this.#harness,
+        state: this.#state,
+        conversationKey,
+        signal: this.#signal,
+      });
+      return status?.statusSnapshot ?? null;
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not read a /status refresh:`,
+        error?.message ?? error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Send the `/status` card (Telegram only).
+   * Returns true when it was delivered; false keeps the text path in charge.
+   */
+  async #presentStatusCard(target, conversationKey, snapshot) {
+    if (!this.#statusCard || typeof this.#statusCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#statusCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        snapshot,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /status card; `
+        + 'falling back to the text status:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
   async #presentHelpCard(target, conversationKey) {
     if (!this.#helpCard || typeof this.#helpCard.present !== 'function') return false;
     if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
@@ -1475,6 +1522,10 @@ export class TextHarnessBridge {
           conversationKey,
           signal: this.#signal,
         });
+        // A keyboard channel gets the actionable card; the text below stays the
+        // answer everywhere else (and whenever the card cannot be delivered).
+        if (status.statusSnapshot
+          && await this.#presentStatusCard(target, conversationKey, status.statusSnapshot)) return;
         await this.#bot.sendText(target, status.message);
         return;
       }
@@ -2208,6 +2259,24 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /status card refreshes in place and opens the pickers on demand. Its
+    // entries replay typed commands, so nothing here can do more than a command.
+    if (this.#statusCard && typeof this.#statusCard.handlePress === 'function') {
+      const handled = await this.#statusCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        refresh: () => this.#readStatusSnapshot(key),
+        run: (command) => this.#runMenuEntry(command, key),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /status press:`,
           error,
         );
         return false;

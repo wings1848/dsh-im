@@ -161,4 +161,15 @@ export default {
   '操作没有完成，请稍后重试或直接发送命令。': 'The action did not finish; retry or send the command directly.',
   '这个渠道暂时不能从卡片里执行该操作，请直接发送命令。': 'This action is not available from the card here; send the command directly.',
   '已完成。': 'Done.',
+  // Actionable /status card (P1-3).
+  '🔄 刷新': '🔄 Refresh',
+  '🏠 菜单': '🏠 Menu',
+  '正在刷新，请稍候。': 'Refreshing, please wait.',
+  '这条状态已处理，发送 /status 可再看一次。': 'This status was used; send /status to see it again.',
+  '这个状态卡已过期，发送 /status 可刷新。': 'This status card expired; send /status to refresh.',
+  '已显示更新的状态，请使用最新一条。': 'A newer status is shown; use the latest one.',
+  '这个状态卡已失效，发送 /status 可刷新。': 'This status card is no longer valid; send /status to refresh.',
+  '这个状态卡已失效或不存在。': 'This status card is no longer valid or does not exist.',
+  '已刷新。': 'Refreshed.',
+  '刷新失败，请发送 /status。': 'Refresh failed; send /status.',
 };

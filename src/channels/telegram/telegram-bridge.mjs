@@ -8,6 +8,7 @@ import { TelegramPresetCard } from './preset-card.mjs';
 import { TelegramClearCard } from './clear-card.mjs';
 import { TelegramMenuCard } from './menu-card.mjs';
 import { TelegramHelpCard } from './help-card.mjs';
+import { TelegramStatusCard } from './status-card.mjs';
 import { TelegramSessionCard } from './session-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
@@ -156,6 +157,10 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       menuCard: options && Object.hasOwn(options, 'menuCard')
         ? options.menuCard
         : new TelegramMenuCard({ logger: options?.logger }),
+      // Actionable `/status`: `statusCard: null` keeps the exact text status.
+      statusCard: options && Object.hasOwn(options, 'statusCard')
+        ? options.statusCard
+        : new TelegramStatusCard({ logger: options?.logger }),
       // Sectioned `/help`: `helpCard: null` keeps the exact text help.
       helpCard: options && Object.hasOwn(options, 'helpCard')
         ? options.helpCard

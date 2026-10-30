@@ -129,5 +129,18 @@ export async function runStatusCommand({
   if (preset) lines.push(t('Agent Preset（预设）：{preset}', { preset }));
   if (running === true) lines.push(t('运行中任务：有（发送 /stop 可停止）'));
 
-  return { message: lines.join('\n') };
+  // `statusSnapshot` is the machine-readable half a channel may render as a card.
+  // It is best-effort like the text: a field the Host could not answer is simply
+  // absent, never an error, so a card can always fall back to the text above.
+  return {
+    message: lines.join('\n'),
+    statusSnapshot: Object.freeze({
+      label,
+      workspace: workspace ?? null,
+      sessionId: boundSessionId,
+      model: model ?? null,
+      preset: preset ?? null,
+      running: running === true,
+    }),
+  };
 }
