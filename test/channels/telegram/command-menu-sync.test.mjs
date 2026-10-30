@@ -262,7 +262,9 @@ test('a failing scoped write keeps the legacy default menu instead of wiping the
       apiServer.reply,
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('No help reply')), 1000); }),
     ]);
-    assert.match(text, /\/history/);
+    // /help 现在可能是分区卡片标题（有键盘渠道）或完整文字；这里只验证
+    // 「有答复」这件事，菜单同步才是本用例的主题。
+    assert.ok(/\/history|DeepSeek Harness 帮助/u.test(text), text);
   } finally {
     clearTimeout(timer);
   }
@@ -456,8 +458,8 @@ for (const failMethod of ['setMyCommands', 'deleteMyCommands', 'setChatMenuButto
         apiServer.reply,
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('No help reply')), 1000); }),
       ]);
-      assert.match(text, /\/history/);
-      assert.match(text, /\/reasoninglist/);
+      // /help 的呈现形态不是本用例的主题（可能是分区卡片，也可能是完整文字）。
+      assert.ok(/\/history|DeepSeek Harness 帮助/u.test(text), text);
     } finally {
       clearTimeout(timer);
     }

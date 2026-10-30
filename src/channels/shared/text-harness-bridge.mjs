@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
-import { commandHelpLines } from './command-catalog.mjs';
+import { commandHelpLines, commandHelpSections } from './command-catalog.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -218,6 +218,7 @@ export class TextHarnessBridge {
   // parse/render plus a registry that owns the press lifecycle).
   #presetCard;
   #menuCard;
+  #helpCard;
   #clearCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
@@ -256,6 +257,7 @@ export class TextHarnessBridge {
     workspaceCard = null,
     presetCard = null,
     menuCard = null,
+    helpCard = null,
     clearCard = null,
     sessionCard = null,
     approvalCard = null,
@@ -285,6 +287,7 @@ export class TextHarnessBridge {
     this.#workspaceCard = workspaceCard ?? null;
     this.#presetCard = presetCard ?? null;
     this.#menuCard = menuCard ?? null;
+    this.#helpCard = helpCard ?? null;
     this.#clearCard = clearCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
@@ -1226,6 +1229,44 @@ export class TextHarnessBridge {
     return result;
   }
 
+  /**
+   * Send the sectioned `/help` card (Telegram only).
+   *
+   * Returns true when the card was delivered. False means the caller sends the
+   * exact text help instead, so `/help` keeps its pinned output on every channel
+   * that cannot show a keyboard.
+   */
+  async #presentHelpCard(target, conversationKey) {
+    if (!this.#helpCard || typeof this.#helpCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    let sections = [];
+    try {
+      sections = commandHelpSections(this.#descriptor.key);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not build the /help sections:`,
+        error?.message ?? error,
+      );
+      return false;
+    }
+    if (sections.length === 0) return false;
+    try {
+      return await this.#helpCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        sections,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /help card; `
+        + 'falling back to the text help:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
   async #presentMenuHub(message, messageId, key) {
     if (!this.#menuCard || typeof this.#menuCard.present !== 'function') return false;
     if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
@@ -1414,6 +1455,10 @@ export class TextHarnessBridge {
       }
       const command = text.toLowerCase();
       if (!hasImages && !hasFiles && command === '/help') {
+        // A keyboard channel gets the sectioned card; the exact text below stays
+        // the answer everywhere else (and whenever the card cannot be delivered),
+        // because it is a pinned cross-channel regression.
+        if (await this.#presentHelpCard(target, conversationKey)) return;
         await this.#bot.sendText(target, [
           t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
           '',
@@ -2163,6 +2208,27 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The sectioned /help card navigates in place; its 「打开控制台」entry hands off
+    // to the /menu hub rather than repainting itself.
+    if (this.#helpCard && typeof this.#helpCard.handlePress === 'function') {
+      const handled = await this.#helpCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        openMenu: () => this.#presentMenuHub(
+          { replyTarget: callback?.replyTarget },
+          null,
+          key,
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /help press:`,
           error,
         );
         return false;
