@@ -257,4 +257,6 @@ export default {
   '多选问题请直接回复文字。':
     'Please answer a multi-select question by replying with text.',
   '已选择：{label}': 'Selected: {label}',
+  '/menu  打开控制台菜单（会话/工作区/模型/预设/状态/帮助）': '/menu  Open the console menu (sessions/workspace/model/preset/status/help)',
+  '打开控制台菜单': 'Open the console menu',
 };

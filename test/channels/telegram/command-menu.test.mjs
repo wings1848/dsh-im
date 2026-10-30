@@ -51,6 +51,7 @@ const DOCUMENTED_ALIASES = [
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
+  // /menu is intentionally helpVisible:false, so /help stays byte-identical.
   assert.equal(help.length, 30);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);

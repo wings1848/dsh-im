@@ -6,6 +6,7 @@ import { TelegramApprovalCard } from './approval-card.mjs';
 import { TelegramModelCard } from './model-card.mjs';
 import { TelegramPresetCard } from './preset-card.mjs';
 import { TelegramClearCard } from './clear-card.mjs';
+import { TelegramMenuCard } from './menu-card.mjs';
 import { TelegramSessionCard } from './session-card.mjs';
 
 export const TELEGRAM_DESCRIPTOR = Object.freeze({
@@ -149,6 +150,11 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       presetCard: options && Object.hasOwn(options, 'presetCard')
         ? options.presetCard
         : new TelegramPresetCard({ logger: options?.logger }),
+      // `/menu` hub: one summary plus entries into the pickers above. `menuCard:
+      // null` keeps the plain text menu (tests/tools) or a channel that prefers it.
+      menuCard: options && Object.hasOwn(options, 'menuCard')
+        ? options.menuCard
+        : new TelegramMenuCard({ logger: options?.logger }),
       // /clear asks once before throwing the context away. `clearCard: null`
       // keeps the immediate (pre-card) behaviour for tests/tools.
       clearCard: options && Object.hasOwn(options, 'clearCard')

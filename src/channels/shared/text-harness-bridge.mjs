@@ -18,6 +18,7 @@ import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isHistoryCommand, runHistoryCommand } from './history-command.mjs';
+import { isMenuCommand, runMenuCommand } from './menu-command.mjs';
 import {
   isControlCommand,
   runControlCommand,
@@ -216,6 +217,7 @@ export class TextHarnessBridge {
   // Optional channel-supplied session picker (same shape as the workspace one:
   // parse/render plus a registry that owns the press lifecycle).
   #presetCard;
+  #menuCard;
   #clearCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
@@ -253,6 +255,7 @@ export class TextHarnessBridge {
     interactionCard = null,
     workspaceCard = null,
     presetCard = null,
+    menuCard = null,
     clearCard = null,
     sessionCard = null,
     approvalCard = null,
@@ -281,6 +284,7 @@ export class TextHarnessBridge {
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
     this.#presetCard = presetCard ?? null;
+    this.#menuCard = menuCard ?? null;
     this.#clearCard = clearCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
@@ -482,13 +486,23 @@ export class TextHarnessBridge {
       this.#acceptedMessageIds.delete(messageId);
       return;
     }
+    // `/menu` is a Telegram-only hub: it renders a summary plus entries into the
+    // pickers this channel already has. An unrenderable or refused card falls
+    // through to the plain /help text, so the command is never a dead end.
+    if (!collectingBatch
+      && isMenuCommand(text)
+      && (normalized.kind !== 'group' || normalized.addressed === true)
+      && await this.#presentMenuHub(normalized, messageId, key)) {
+      return;
+    }
     const commandRunner = collectingBatch ? null : isClearCommand(text) ? runClearCommand
       : isHistoryCommand(text) ? runHistoryCommand
       : hasInboundFiles(normalized) ? null : isControlCommand(text)
       ? runControlCommand
       : (isModelCommand(text)
           ? runModelCommand
-          : (isPresetCommand(text) ? runPresetCommand : null));
+          : (isPresetCommand(text) ? runPresetCommand
+            : (isMenuCommand(text) ? runMenuCommand : null)));
     if (commandRunner && (normalized.kind !== 'group' || normalized.addressed === true)) {
       let task;
       task = this.#processFastCommand(
@@ -1127,6 +1141,130 @@ export class TextHarnessBridge {
     if (presented) {
       // Only now is this message really handled: a refused card leaves the
       // typed command to run normally, so it must not be marked as consumed.
+      if (typeof this.#state?.markSeen === 'function') await this.#state.markSeen(messageId);
+      this.#status.messagesReceived += 1;
+      this.#status.lastMessageAt = new Date().toISOString();
+      this.#status.lastError = null;
+    }
+    return presented;
+  }
+
+  /**
+   * Send the `/menu` hub (Telegram only).
+   *
+   * Returns true when the hub was delivered. False means the caller must answer
+   * `/menu` with the text path instead, so the command always produces output.
+   *
+   * The snapshot is assembled from data the bridge already reads elsewhere
+   * (`/status`, the workspace switches), each field independently optional: a
+   * Host that cannot answer one of them still gets a usable hub.
+   */
+  /**
+   * Replay one `/menu` entry's command through the same runners the typed
+   * command uses, so the hub can never invent behaviour a command lacks.
+   */
+  async #runMenuEntry(command, key) {
+    const options = { signal: this.#signal };
+    // `/help` and `/status` are answered by the bridge itself, never a runner:
+    // resolve them first so a generic runner cannot claim them.
+    if (/^\/help$/iu.test(command)) {
+      return {
+        handled: true,
+        message: [
+          t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
+          '',
+          ...commandHelpLines(this.#descriptor.key),
+        ].join('\n'),
+      };
+    }
+    if (/^\/status$/iu.test(command)) {
+      const status = await runStatusCommand({
+        descriptor: this.#descriptor,
+        harness: this.#harness,
+        state: this.#state,
+        conversationKey: key,
+        signal: this.#signal,
+      });
+      return { handled: true, message: status.message };
+    }
+    let result = null;
+    if (isHistoryCommand(command)) {
+      result = await runHistoryCommand(command, this.#harness, this.#state, key, options);
+    } else if (isModelCommand(command)) {
+      result = await runModelCommand(command, this.#harness, this.#state, key, options);
+    } else if (isPresetCommand(command)) {
+      result = await runPresetCommand(command, this.#harness, this.#state, key, options);
+    } else if (isControlCommand(command)) {
+      result = await runControlCommand(command, this.#harness, this.#state, key, options);
+    } else if (isWorkspaceCommand(command)) {
+      result = await runWorkspaceCommand(command, this.#harness, key, options);
+    }
+    // `/help` and `/status` are answered by the bridge itself, not a runner.
+    if (!result?.handled) {
+      if (/^\/help$/iu.test(command)) {
+        return {
+          handled: true,
+          message: [
+            t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
+            '',
+            ...commandHelpLines(this.#descriptor.key),
+          ].join('\n'),
+        };
+      }
+      if (/^\/status$/iu.test(command)) {
+        const status = await runStatusCommand({
+          descriptor: this.#descriptor,
+          harness: this.#harness,
+          state: this.#state,
+          conversationKey: key,
+          signal: this.#signal,
+        });
+        return { handled: true, message: status.message };
+      }
+      return null;
+    }
+    return result;
+  }
+
+  async #presentMenuHub(message, messageId, key) {
+    if (!this.#menuCard || typeof this.#menuCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    const snapshot = {};
+    try {
+      snapshot.workspace = typeof this.#harness?.currentConversationWorkspace === 'function'
+        ? this.#harness.currentConversationWorkspace(key)
+        : null;
+      snapshot.workspace = snapshot.workspace
+        || (typeof this.#harness?.currentWorkspace === 'function'
+          ? this.#harness.currentWorkspace()
+          : null);
+    } catch {
+      snapshot.workspace = null;
+    }
+    try {
+      snapshot.sessionId = typeof this.#state?.sessionFor === 'function'
+        ? this.#state.sessionFor(key)
+        : null;
+    } catch {
+      snapshot.sessionId = null;
+    }
+    let presented = false;
+    try {
+      presented = await this.#menuCard.present({
+        bot: this.#bot,
+        target: message.replyTarget,
+        conversationKey: key,
+        snapshot,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /menu hub; `
+        + 'falling back to the text menu:',
+        error?.message ?? error,
+      );
+      presented = false;
+    }
+    if (presented) {
       if (typeof this.#state?.markSeen === 'function') await this.#state.markSeen(messageId);
       this.#status.messagesReceived += 1;
       this.#status.lastMessageAt = new Date().toISOString();
@@ -2025,6 +2163,23 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /menu hub is a launcher: a press replays one command and leaves the hub
+    // in place, so this branch never settles the card.
+    if (this.#menuCard && typeof this.#menuCard.handlePress === 'function') {
+      const handled = await this.#menuCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: (command) => this.#runMenuEntry(command, key),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /menu press:`,
           error,
         );
         return false;

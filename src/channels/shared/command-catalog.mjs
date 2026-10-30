@@ -9,6 +9,9 @@ function defineCatalogCommand(name, description, help, { aliases = [], ...option
     channels: TEXT_CHANNELS,
     menuVisible: true,
     ...options,
+    // Own the list: an override like `channels: ['telegram']` must be frozen too,
+    // or a caller could mutate the catalog it was handed.
+    channels: Object.freeze(Array.isArray(options.channels) ? options.channels : TEXT_CHANNELS),
     aliases: Object.freeze(aliases.map((alias) => Object.freeze({
       menuVisible: true,
       ...(typeof alias === 'string' ? { name: alias } : alias),
@@ -109,6 +112,16 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('help', '显示帮助', [
     '/help  显示本帮助',
   ]),
+  // Telegram-only hub. `helpVisible: false` keeps `/help` byte-for-byte what it
+  // has always been (a pinned cross-channel regression), while `/menu` itself
+  // still advertises the hub and the native command menu lists it.
+  defineCatalogCommand('menu', '打开控制台菜单', [
+    '/menu  打开控制台菜单（会话/工作区/模型/预设/状态/帮助）',
+  ], {
+    channels: ['telegram'],
+    menuVisible: false,
+    helpVisible: false,
+  }),
 ]);
 
 export function commandsForChannel(channel, catalog = SHARED_COMMAND_CATALOG) {
@@ -116,5 +129,7 @@ export function commandsForChannel(channel, catalog = SHARED_COMMAND_CATALOG) {
 }
 
 export function commandHelpLines(channel, catalog = SHARED_COMMAND_CATALOG) {
-  return commandsForChannel(channel, catalog).flatMap((item) => item.help.map((line) => t(line)));
+  return commandsForChannel(channel, catalog)
+    .filter((item) => item.helpVisible !== false)
+    .flatMap((item) => item.help.map((line) => t(line)));
 }
