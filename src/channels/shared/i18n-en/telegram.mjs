@@ -199,4 +199,7 @@ export default {
   '用法：/help（不带参数）': 'Usage: /help (no arguments)',
   '用法：/status（不带参数）': 'Usage: /status (no arguments)',
   '用法：/new（不带参数）': 'Usage: /new (no arguments)',
+  // /status group-chat redaction.
+  '工作区：{workspace}（群聊中仅显示末段）': 'Workspace: {workspace} (only the last segment is shown in a group)',
+  '当前模型：已设置（群聊中不显示具体名称）': 'Current model: set (the name is hidden in a group)',
 };

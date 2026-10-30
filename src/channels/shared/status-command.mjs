@@ -10,6 +10,14 @@ const SESSION_ID_DISPLAY_LENGTH = 12;
  */
 export const STATUS_FIELD_TIMEOUT_MS = 3_000;
 
+/** The last path segment, used when a full path must not be shown. */
+function workspaceTail(path) {
+  const text = typeof path === 'string' ? path.replace(/[/\\]+$/u, '') : '';
+  if (!text) return '（未知）';
+  const tail = text.slice(Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\')) + 1);
+  return tail || text;
+}
+
 function shortenedSessionId(sessionId) {
   return sessionId.length > SESSION_ID_DISPLAY_LENGTH
     ? `${sessionId.slice(0, SESSION_ID_DISPLAY_LENGTH)}…`
@@ -82,6 +90,22 @@ async function settled(operation) {
  * a bounded signal ({@link STATUS_FIELD_TIMEOUT_MS}) so a frozen Host cannot
  * make the command hang.
  */
+/**
+ * Whether this conversation's details may be shown in full.
+ *
+ * A group chat is a room full of people: the absolute workspace path, the Session
+ * id and the model name describe the *operator's* machine, not the group's
+ * business. So in a group the reply keeps the useful part (is it connected, is
+ * something running) and drops/短ens the identifying part. Direct chats are
+ * unchanged — that is the operator's own chat.
+ *
+ * `conversationKey` is already shaped `direct:<id>` / `group:<id>`, so no extra
+ * parameter is needed and every caller gets this automatically.
+ */
+function isSharedConversation(conversationKey) {
+  return typeof conversationKey === 'string' && conversationKey.startsWith('group:');
+}
+
 export async function runStatusCommand({
   descriptor,
   harness,
@@ -103,15 +127,24 @@ export async function runStatusCommand({
   const label = descriptor?.label ?? 'Telegram';
   const lines = [t('{label}机器人与 DeepSeek Harness 连接正常。', { label })];
 
+  const shared = isSharedConversation(conversationKey);
   const workspace = await settled(() => readWorkspace(harness, conversationKey));
-  if (workspace) lines.push(t('工作区：{workspace}', { workspace }));
+  // The absolute path is the operator's filesystem layout: show its last segment
+  // (enough to tell workspaces apart) instead of the full path in a group.
+  if (workspace) {
+    lines.push(shared
+      ? t('工作区：{workspace}（群聊中仅显示末段）', { workspace: workspaceTail(workspace) })
+      : t('工作区：{workspace}', { workspace }));
+  }
 
   const sessionId = await settled(async () => (typeof state?.sessionFor === 'function'
     ? state.sessionFor(conversationKey)
     : null));
   const boundSessionId = typeof sessionId === 'string' && sessionId ? sessionId : null;
   lines.push(boundSessionId
-    ? t('绑定会话：{session}', { session: shortenedSessionId(boundSessionId) })
+    ? t('绑定会话：{session}', {
+      session: shared ? `…${boundSessionId.slice(-6)}` : shortenedSessionId(boundSessionId),
+    })
     : t('绑定会话：未绑定（发送消息后自动创建）'));
 
   const session = boundSessionId
@@ -124,7 +157,8 @@ export async function runStatusCommand({
     settled(() => readPreset(harness, fieldOptions)),
     session ? settled(() => readRunning(session, fieldOptions)) : false,
   ]);
-  if (model) lines.push(t('当前模型：{model}', { model }));
+  if (model && !shared) lines.push(t('当前模型：{model}', { model }));
+  else if (model && shared) lines.push(t('当前模型：已设置（群聊中不显示具体名称）'));
   else if (!session) lines.push(t('当前模型：暂无（创建会话后显示）'));
   if (preset) lines.push(t('Agent Preset（预设）：{preset}', { preset }));
   if (running === true) lines.push(t('运行中任务：有（发送 /stop 可停止）'));
@@ -134,11 +168,18 @@ export async function runStatusCommand({
   // absent, never an error, so a card can always fall back to the text above.
   return {
     message: lines.join('\n'),
+    // The snapshot carries the *same* redaction the text got: a card must never
+    // leak what the text path deliberately hid. `shared` is applied once, here,
+    // so both surfaces stay in step by construction.
     statusSnapshot: Object.freeze({
       label,
-      workspace: workspace ?? null,
+      shared,
+      workspace: workspace
+        ? (shared ? workspaceTail(workspace) : workspace)
+        : null,
       sessionId: boundSessionId,
-      model: model ?? null,
+      model: model ? (shared ? null : model) : null,
+      modelHidden: Boolean(model) && shared,
       preset: preset ?? null,
       running: running === true,
     }),

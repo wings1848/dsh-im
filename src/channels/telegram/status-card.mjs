@@ -114,15 +114,25 @@ export function statusCardText(snapshot = {}) {
     running = false,
   } = snapshot ?? {};
   const lines = [t('{label}机器人与 DeepSeek Harness 连接正常。', { label })];
+  const shared = snapshot?.shared === true;
   const name = workspaceName(workspace);
-  if (name) lines.push(t('工作区：{workspace}', { workspace: name }));
+  if (name) {
+    // The status command already shortened this in a group; say so, because a
+    // bare last segment otherwise reads like a full path that got truncated.
+    lines.push(shared
+      ? t('工作区：{workspace}（群聊中仅显示末段）', { workspace: name })
+      : t('工作区：{workspace}', { workspace: name }));
+  }
   if (typeof sessionId === 'string' && sessionId) {
-    lines.push(t('绑定会话：{session}', { session: sessionId }));
+    // A group only needs enough to tell sessions apart.
+    lines.push(t('绑定会话：{session}', { session: shared ? `…${sessionId.slice(-6)}` : sessionId }));
   } else {
     lines.push(t('绑定会话：未绑定（发送消息后自动创建）'));
   }
   if (typeof model === 'string' && model) {
     lines.push(t('当前模型：{model}', { model }));
+  } else if (snapshot?.modelHidden === true) {
+    lines.push(t('当前模型：已设置（群聊中不显示具体名称）'));
   } else if (!sessionId) {
     lines.push(t('当前模型：暂无（创建会话后显示）'));
   }
