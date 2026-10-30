@@ -55,12 +55,14 @@ function bridgeFixture({
   registry,
   sessionCard = true,
   parkBind = false,
+  failClear = false,
 } = {}) {
   const sent = [];
   const cards = [];
   const notices = [];
   const edits = [];
   const binds = [];
+  const clears = [];
   let bound = currentSessionId;
   let releaseBind = null;
   const bridge = new TextHarnessBridge({
@@ -71,6 +73,11 @@ function bridgeFixture({
       async markSeen(messageId) { this.seen.add(messageId); },
       sessionFor() { return bound; },
       async setSession(_key, sessionId) { bound = sessionId; },
+      async clearSession() {
+        clears.push(1);
+        if (failClear) throw new Error('clearSession failed');
+        bound = null;
+      },
     },
     ...(sessionCard
       ? {
@@ -125,6 +132,7 @@ function bridgeFixture({
     notices,
     edits,
     binds,
+    clears,
     releaseBind: () => releaseBind?.(),
   };
 }
@@ -189,7 +197,10 @@ test('/sessionlist sends one session card with title, short ID and current ✓',
   assert.match(cards[0].text, /会话（2）/);
   assert.match(cards[0].text, /点击按钮把会话绑定到当前聊天/);
   const rows = cards[0].markup.inline_keyboard;
-  assert.equal(rows.length, 2, 'archived sessions never become buttons');
+  // Two visible session rows plus the action strip; archived sessions never
+  // become buttons.
+  assert.equal(rows.length, 3);
+  assert.ok(rows.flat().every((button) => !/archived|归档/u.test(button.text)));
   assert.equal(rows[0][0].text, '✓ 会话 1 · 00000001');
   assert.equal(rows[1][0].text, '会话 2 · 00000002');
   assert.doesNotMatch(JSON.stringify(cards[0]), /已归档/);
@@ -211,8 +222,9 @@ test('long lists paginate ten per page and page presses edit the same card in pl
   await bridge.accept(message('/sessionlist'));
 
   const firstKeyboard = cards[0].markup.inline_keyboard;
-  assert.equal(firstKeyboard.length, TELEGRAM_SESSION_CARD_PAGE_SIZE + 1);
-  const firstPager = firstKeyboard.at(-1);
+  // ten session rows + pager + the action strip
+  assert.equal(firstKeyboard.length, TELEGRAM_SESSION_CARD_PAGE_SIZE + 2);
+  const firstPager = firstKeyboard.at(-2);
   assert.deepEqual(firstPager.map((button) => button.text), ['第 1/2 页', '下一页 ▶']);
   await press(bridge, firstPager[1].callback_data);
 
@@ -221,9 +233,9 @@ test('long lists paginate ten per page and page presses edit the same card in pl
   assert.equal(edits[0].messageId, '701');
   assert.match(edits[0].text, /会话（12）.*第 2\/2 页/);
   const secondKeyboard = edits[0].markup.inline_keyboard;
-  assert.equal(secondKeyboard.length, 3, 'two session rows plus the pager');
+  assert.equal(secondKeyboard.length, 4, 'two session rows, the pager and the actions');
   assert.equal(secondKeyboard[0][0].text, '会话 11 · 00000011');
-  assert.deepEqual(secondKeyboard.at(-1).map((button) => button.text), ['◀ 上一页', '第 2/2 页']);
+  assert.deepEqual(secondKeyboard.at(-2).map((button) => button.text), ['◀ 上一页', '第 2/2 页']);
 });
 
 test('pressing the page indicator is an idempotent receipt and keeps the card alive', async () => {
@@ -231,7 +243,7 @@ test('pressing the page indicator is an idempotent receipt and keeps the card al
     sessions: sessionsFixture(TELEGRAM_SESSION_CARD_PAGE_SIZE + 1),
   });
   await bridge.accept(message('/sessionlist'));
-  const indicator = cards[0].markup.inline_keyboard.at(-1)[0];
+  const indicator = cards[0].markup.inline_keyboard.at(-2)[0];
   assert.equal(indicator.text, '第 1/2 页');
   await press(bridge, indicator.callback_data);
   assert.equal(edits.length, 0, 'no edit for a no-op page press');
@@ -349,7 +361,9 @@ test('callback payloads stay within 64 bytes and carry no session ID or workspac
     assert.match(parsed.nonce, /^[A-Za-z0-9_-]{1,32}$/);
     parsedKinds.add(parsed.kind);
   }
-  assert.deepEqual([...parsedKinds].sort(), ['bind', 'page']);
+  // `new` rides the same namespace: the strip acts on this conversation, so like
+  // bind/page it carries no id. Nothing is bound here, so there is no 解绑 row.
+  assert.deepEqual([...parsedKinds].sort(), ['bind', 'new', 'page']);
 });
 
 test('a newer session list retires the previous card keyboard', async () => {
@@ -480,9 +494,14 @@ test('English UI translates the card body, the pager, the hint and the receipt',
   assert.match(cards[0].text, new RegExp(`^Workspace: ${WORKSPACE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u'));
   assert.match(cards[0].text, /Sessions \(12\): Page 1\/2/u);
   assert.match(cards[0].text, /Tap a session button to bind it to this chat\./u);
+  // The pager is second-to-last now; the action strip closes the card.
+  assert.deepEqual(
+    cards[0].markup.inline_keyboard.at(-2).map((button) => button.text),
+    ['Page 1/2', 'Next ▶'],
+  );
   assert.deepEqual(
     cards[0].markup.inline_keyboard.at(-1).map((button) => button.text),
-    ['Page 1/2', 'Next ▶'],
+    ['🆕 New session'],
   );
 
   await press(bridge, cards[0].markup.inline_keyboard[1][0].callback_data);
@@ -517,5 +536,150 @@ test('the Telegram bridge wires the session picker by default', async () => {
   await bridge.accept(message('/sessionlist'));
   assert.equal(cards.length, 1, 'the default bridge carries the picker');
   assert.match(cards[0].text, /会话（2）/);
-  assert.equal(cards[0].markup.inline_keyboard.length, 2);
+  // two session rows + the action strip
+  assert.equal(cards[0].markup.inline_keyboard.length, 3);
+});
+
+// ── action strip: 解绑 / 新会话 ───────────────────────────────────────────────
+
+function actionsOf(card) {
+  return card.markup.inline_keyboard.at(-1);
+}
+
+test('a bound chat gets both 解绑 and 新会话; an unbound one only 新会话', async () => {
+  const sessions = sessionsFixture(2);
+  const bound = bridgeFixture({ sessions, currentSessionId: sessions[0].sessionId });
+  await bound.bridge.accept(message('/sessionlist'));
+  const actions = actionsOf(bound.cards[0]);
+  assert.deepEqual(actions.map((button) => button.text), ['🔓 解绑当前会话', '🆕 新会话']);
+
+  const unbound = bridgeFixture({ sessions });
+  await unbound.bridge.accept(message('/sessionlist'));
+  assert.deepEqual(actionsOf(unbound.cards[0]).map((button) => button.text), ['🆕 新会话']);
+});
+
+test('the 解绑 row drops the binding and turns the card into a receipt', async () => {
+  const sessions = sessionsFixture(2);
+  const { bridge, cards, edits, clears, notices } = bridgeFixture({
+    sessions,
+    currentSessionId: sessions[0].sessionId,
+  });
+  await bridge.accept(message('/sessionlist'));
+  const unbind = actionsOf(cards[0])[0];
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-unbind',
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-a',
+    messageId: 'update-unbind',
+    providerMessageId: '701',
+    data: unbind.callback_data,
+    replyTarget: { chatId: 42 },
+  });
+  assert.equal(clears.length, 1, 'the binding is released once');
+  // The receipt replaces the list, and the keyboard is gone.
+  const receipt = edits.find((edit) => edit.text);
+  assert.ok(receipt, 'the card body is rewritten');
+  assert.match(receipt.text, /已解绑会话/u);
+  assert.deepEqual(receipt.markup, { inline_keyboard: [] });
+  assert.ok(notices.some(({ text }) => /已解绑/u.test(text ?? '')));
+});
+
+test('the 新会话 row starts a fresh session through the /new path', async () => {
+  const sessions = sessionsFixture(2);
+  const { bridge, cards, edits, clears } = bridgeFixture({
+    sessions,
+    currentSessionId: sessions[0].sessionId,
+  });
+  await bridge.accept(message('/sessionlist'));
+  const startNew = actionsOf(cards[0]).at(-1);
+  assert.equal(startNew.text, '🆕 新会话');
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-new',
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-a',
+    messageId: 'update-new',
+    providerMessageId: '701',
+    data: startNew.callback_data,
+    replyTarget: { chatId: 42 },
+  });
+  assert.equal(clears.length, 1);
+  const receipt = edits.find((edit) => edit.text);
+  assert.match(receipt.text, /已开启新会话/u);
+  assert.deepEqual(receipt.markup, { inline_keyboard: [] });
+});
+
+test('a double press on an action row releases only once', async () => {
+  const sessions = sessionsFixture(2);
+  const { bridge, cards, clears } = bridgeFixture({
+    sessions,
+    currentSessionId: sessions[0].sessionId,
+  });
+  await bridge.accept(message('/sessionlist'));
+  const unbind = actionsOf(cards[0])[0];
+  const callback = (queryId, messageId) => ({
+    callbackQueryId: queryId,
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-a',
+    messageId,
+    providerMessageId: '701',
+    data: unbind.callback_data,
+    replyTarget: { chatId: 42 },
+  });
+  await Promise.all([
+    bridge.acceptCallback(callback('cb-1', 'update-1')),
+    bridge.acceptCallback(callback('cb-2', 'update-2')),
+  ]);
+  assert.equal(clears.length, 1, 'the binding is released exactly once');
+});
+
+test('an action row from another chat cannot touch this conversation', async () => {
+  const sessions = sessionsFixture(2);
+  const { bridge, cards, clears } = bridgeFixture({
+    sessions,
+    currentSessionId: sessions[0].sessionId,
+  });
+  await bridge.accept(message('/sessionlist'));
+  const unbind = actionsOf(cards[0])[0];
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-other',
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-b',
+    messageId: 'update-other',
+    providerMessageId: '701',
+    data: unbind.callback_data,
+    replyTarget: { chatId: 43 },
+  });
+  assert.equal(clears.length, 0);
+});
+
+test('a failed release leaves the card usable instead of claiming success', async () => {
+  const sessions = sessionsFixture(2);
+  const { bridge, cards, edits, notices } = bridgeFixture({
+    sessions,
+    currentSessionId: sessions[0].sessionId,
+    failClear: true,
+  });
+  await bridge.accept(message('/sessionlist'));
+  const unbind = actionsOf(cards[0])[0];
+  await bridge.acceptCallback({
+    callbackQueryId: 'cb-fail',
+    senderId: 'actor-a',
+    senderIsBot: false,
+    kind: 'direct',
+    conversationId: 'chat-a',
+    messageId: 'update-fail',
+    providerMessageId: '701',
+    data: unbind.callback_data,
+    replyTarget: { chatId: 42 },
+  });
+  assert.equal(edits.filter((edit) => edit.text).length, 0, 'no success receipt is painted');
+  assert.ok(notices.some(({ text }) => /没有完成/u.test(text ?? '')));
 });

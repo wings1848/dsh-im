@@ -49,6 +49,10 @@ const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 
+const ACTION_UNAVAILABLE_TEXT = '这个渠道暂时不能从卡片里执行该操作，请直接发送命令。';
+const ACTION_FALLBACK_TEXT = '操作没有完成，请稍后重试或直接发送命令。';
+const ACTION_DONE_TEXT = '已完成。';
+
 const EXPIRED_LIST_TEXT = '这个会话列表已过期，请重新发送 /sessionlist 或 /session。';
 const PAGE_UPDATE_FAILED_TEXT = '暂时无法更新会话列表，请重新发送 /sessionlist。';
 const PAGE_ALREADY_TEXT = '已经是第 {page} 页。';
@@ -123,6 +127,23 @@ export function telegramSessionBindCallbackData(nonce, index) {
   return TELEGRAM_SESSION_CARD_CALLBACK.encode({ nonce, action: `i${index}` });
 }
 
+/**
+ * Encode one row of the action strip.
+ *
+ * `u` releases the binding (the same `clearSession` `/new` performs) and `n`
+ * opens a fresh session through the same path `/new` takes. Neither carries an
+ * id: both act on this conversation, which is the only thing a card owns.
+ */
+export function telegramSessionActionCallbackData(nonce, action) {
+  if (action !== 'unbind' && action !== 'new') {
+    throw new TypeError('A session card action must be unbind or new');
+  }
+  return TELEGRAM_SESSION_CARD_CALLBACK.encode({
+    nonce,
+    action: action === 'unbind' ? 'u' : 'n',
+  });
+}
+
 /** Encode one pager button (`p<page>`); the page is clamped again on press. */
 export function telegramSessionPageCallbackData(nonce, page) {
   if (!Number.isSafeInteger(page) || page < 0 || page > 99) {
@@ -139,6 +160,8 @@ export function parseTelegramSessionCallback(data) {
   if (bind) return { nonce: parsed.nonce, kind: 'bind', index: Number(bind[1]) };
   const page = /^p(\d{1,3})$/u.exec(parsed.action);
   if (page) return { nonce: parsed.nonce, kind: 'page', page: Number(page[1]) };
+  if (parsed.action === 'u') return { nonce: parsed.nonce, kind: 'unbind' };
+  if (parsed.action === 'n') return { nonce: parsed.nonce, kind: 'new' };
   return null;
 }
 
@@ -229,6 +252,21 @@ export function telegramSessionCardRender(listing, {
     }
     rows.push(pager);
   }
+  // Actions strip: only offer 解绑 when something is actually bound, so the row
+  // never advertises an operation that would do nothing. 新会话 is always useful
+  // (it starts a fresh session in this workspace).
+  const actions = [];
+  if (current) {
+    actions.push({
+      text: t('🔓 解绑当前会话'),
+      callback_data: telegramSessionActionCallbackData(nonce, 'unbind'),
+    });
+  }
+  actions.push({
+    text: t('🆕 新会话'),
+    callback_data: telegramSessionActionCallbackData(nonce, 'new'),
+  });
+  rows.push(actions);
   const header = [
     t('工作区：{workspace}', { workspace: snapshot.workspace }),
     [
@@ -365,6 +403,8 @@ export class TelegramSessionCard {
     answer,
     currentSessionId,
     bind,
+    release,
+    startNew,
   } = {}) {
     const parsed = parseTelegramSessionCallback(callback?.data);
     if (!parsed) return false;
@@ -395,9 +435,79 @@ export class TelegramSessionCard {
         conversationKey, bot, answer, target, messageId,
       });
     }
+    // The action strip acts on this conversation, not on a listed row, so it
+    // bypasses the bind path entirely (no index, no listing lookup).
+    if (parsed.kind === 'unbind' || parsed.kind === 'new') {
+      return this.#handleActionPress(entry, parsed, {
+        conversationKey, bot, answer, target, messageId, release, startNew,
+      });
+    }
     return this.#handleBindPress(callback, entry, parsed, {
       conversationKey, bot, answer, currentSessionId, bind, target, messageId,
     });
+  }
+
+  /**
+   * Handle 解绑 / 新会话.
+   *
+   * Both act on this conversation only: releasing drops the binding through the
+   * same `clearSession` that `/new` uses, and 新会话 takes the same path as the
+   * typed command. The card is retired afterwards because its ✓ marker (and the
+   * 解绑 row) describe a binding that no longer exists.
+   */
+  async #handleActionPress(entry, parsed, {
+    conversationKey, bot, answer, target, messageId, release, startNew,
+  }) {
+    const handler = parsed.kind === 'unbind' ? release : startNew;
+    if (typeof handler !== 'function') {
+      await this.#answerSafely(answer, t(ACTION_UNAVAILABLE_TEXT));
+      return true;
+    }
+    const claimed = this.#registry.claim(parsed.nonce);
+    if (claimed.status !== ACTION_CARD_STATUS.ACTIVE) {
+      await this.#answerSafely(answer, actionCardStateText(claimed.status, this.#notices));
+      return true;
+    }
+    let outcome;
+    try {
+      outcome = await handler({ conversationKey });
+    } catch (error) {
+      // A failed release/restart must not leave the card claiming it happened.
+      // `ACTIVE` is not a terminal status, so settle() would throw and the error
+      // would escape into the outer handler (which reports a bogus "list
+      // expired"); releasing the claim is what actually makes the card usable.
+      this.#registry.releaseClaim(parsed.nonce);
+      await this.#answerSafely(answer, t(ACTION_FALLBACK_TEXT));
+      return true;
+    }
+    this.#registry.settle(parsed.nonce, ACTION_CARD_STATUS.RESOLVED);
+    if (outcome?.text) {
+      const edited = await this.#editCardText(bot, target, messageId, outcome.text);
+      if (!edited && typeof bot?.sendText === 'function') {
+        await bot.sendText(target, outcome.text);
+      }
+    }
+    await this.#retireKeyboard(bot, target, messageId);
+    await this.#answerSafely(answer, outcome?.notice ?? t(ACTION_DONE_TEXT));
+    return true;
+  }
+
+  /** Replace the card body with a plain receipt (no keyboard). */
+  async #editCardText(bot, target, messageId, text) {
+    if (!target || messageId === null || typeof bot?.editInteractionCard !== 'function') return false;
+    try {
+      await bot.editInteractionCard(target, messageId, {
+        text,
+        markup: EMPTY_KEYBOARD,
+      });
+      return true;
+    } catch (error) {
+      this.#logger.warn?.(
+        '[dsh-im:telegram] could not rewrite a session card as a receipt:',
+        error?.message ?? error,
+      );
+      return false;
+    }
   }
 
   async #handlePagePress(callback, entry, parsed, {

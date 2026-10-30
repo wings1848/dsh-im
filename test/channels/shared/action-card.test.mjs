@@ -183,3 +183,50 @@ test('every card state has a non-empty unified notice and channels can override 
   );
   assert.equal(actionCardStateText('made-up'), actionCardStateText(ACTION_CARD_STATUS.UNKNOWN));
 });
+
+// A card whose action failed but whose target is still actionable must give the
+// keyboard back; without this it stays `claimed` and every later press is
+// answered with "still working", so the only recovery is a typed command.
+test('a live claim can be released so the same button can act again', () => {
+  let counter = 0;
+  const registry = new ActionCardRegistry({ createNonce: () => `nonce-${++counter}` });
+  registry.issue({ conversationKey: 'direct:42', kind: 'session-bind' });
+  assert.equal(registry.claim('nonce-1').status, ACTION_CARD_STATUS.ACTIVE);
+
+  const released = registry.releaseClaim('nonce-1');
+  assert.equal(released?.status, ACTION_CARD_STATUS.ACTIVE);
+  assert.equal(released?.claimedAt, null);
+  // The button works again, and only the first press of the retry wins.
+  assert.equal(registry.claim('nonce-1').status, ACTION_CARD_STATUS.ACTIVE);
+  assert.equal(registry.claim('nonce-1').status, ACTION_CARD_STATUS.CLAIMED);
+});
+
+test('a released claim never revives a dead card', () => {
+  let counter = 0;
+  const registry = new ActionCardRegistry({ createNonce: () => `nonce-${++counter}` });
+  registry.issue({ conversationKey: 'direct:42' });
+  registry.claim('nonce-1');
+  registry.settle('nonce-1', ACTION_CARD_STATUS.RESOLVED);
+  assert.equal(registry.releaseClaim('nonce-1'), null, 'a resolved card stays dead');
+  assert.equal(registry.claim('nonce-1').status, ACTION_CARD_STATUS.RESOLVED);
+
+  assert.equal(registry.releaseClaim('nonce-missing'), null);
+  // Never claimed: nothing to release, but the card is still pressable.
+  registry.issue({ conversationKey: 'direct:44' });
+  const nonce = registry.activeFor('direct:44').nonce;
+  assert.equal(registry.releaseClaim(nonce), null);
+  assert.equal(registry.claim(nonce).status, ACTION_CARD_STATUS.ACTIVE);
+
+  // An expired claim is dead too: the TTL already decided it.
+  const clock = fakeClock();
+  const clocked = new ActionCardRegistry({
+    now: clock.now,
+    ttlMs: 20,
+    createNonce: () => 'nonce-ttl',
+  });
+  clocked.issue({ conversationKey: 'direct:45' });
+  clocked.claim('nonce-ttl');
+  clock.advance(50);
+  assert.equal(clocked.releaseClaim('nonce-ttl'), null);
+  assert.equal(clocked.claim('nonce-ttl').status, ACTION_CARD_STATUS.EXPIRED);
+});

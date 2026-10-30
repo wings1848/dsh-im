@@ -236,6 +236,25 @@ export class ActionCardRegistry {
   }
 
   /**
+   * Give a claimed card its keyboard back after an operation that failed but is
+   * still retryable (a transient RPC error, a refused write).
+   *
+   * `settle()` only accepts terminal statuses, so a caller that wants the press
+   * to be available again has no other way back. Only a live claim can be
+   * released: a card already resolved, expired or superseded must stay dead, or
+   * a stale press could act on newer state. Returns the released entry, or null.
+   */
+  releaseClaim(nonce) {
+    const entry = this.#lookup(nonce);
+    if (!entry) return null;
+    this.#expireIfNeeded(entry);
+    if (entry.status !== ACTION_CARD_STATUS.CLAIMED) return null;
+    entry.status = ACTION_CARD_STATUS.ACTIVE;
+    entry.claimedAt = null;
+    return entry;
+  }
+
+  /**
    * Move a live card to a terminal state. Returns false when there is nothing
    * left to settle (unknown, expired, or already settled).
    */

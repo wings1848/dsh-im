@@ -2427,6 +2427,56 @@ export class TextHarnessBridge {
    * bridge only supplies the command gate (a card is a command surface) and the
    * same typed bind path the text command uses.
    */
+  /**
+   * Drop this conversation's Session binding (the 解绑 row).
+   *
+   * Mirrors the typed `/new` minus the prompt: the binding is cleared and the
+   * context anchors are reset, because those describe the session being released.
+   * Returns the receipt the card shows in place of the list.
+   */
+  async #releaseSessionBinding(key) {
+    if (typeof this.#state?.clearSession !== 'function') {
+      return { notice: t('当前机器人没有可用的会话状态。') };
+    }
+    await this.#state.clearSession(key);
+    if (this.#contextHooks?.onSessionCleared) {
+      try {
+        await this.#contextHooks.onSessionCleared(key);
+      } catch (error) {
+        this.#logger.warn?.(
+          `[dsh-im:${this.#descriptor.key}] failed to reset context anchors after a card unbind:`,
+          error?.message ?? error,
+        );
+      }
+    }
+    return {
+      text: t('已解绑会话。下一条消息会自动开启新会话。'),
+      notice: t('已解绑。'),
+    };
+  }
+
+  /** Start a fresh Session here (the 新会话 row), exactly as `/new` does. */
+  async #startNewSession(key) {
+    if (typeof this.#state?.clearSession !== 'function') {
+      return { notice: t('当前机器人没有可用的会话状态。') };
+    }
+    await this.#state.clearSession(key);
+    if (this.#contextHooks?.onSessionCleared) {
+      try {
+        await this.#contextHooks.onSessionCleared(key);
+      } catch (error) {
+        this.#logger.warn?.(
+          `[dsh-im:${this.#descriptor.key}] failed to reset context anchors after a card /new:`,
+          error?.message ?? error,
+        );
+      }
+    }
+    return {
+      text: t('已开启新会话。请发送你的问题。'),
+      notice: t('已开启新会话。'),
+    };
+  }
+
   async #handleSessionCardPress(callback, key) {
     if (this.#signal?.aborted) return;
     const notice = (text) => this.#answerInteractionCallback(callback, text);
@@ -2456,6 +2506,11 @@ export class TextHarnessBridge {
         bind: (sessionId) => runWorkspaceCommand(
           `/session ${sessionId}`, this.#harness, key,
         ),
+        // 解绑 drops the binding only; 新会话 runs the same path as the typed
+        // command, including the context-anchor reset, so the card never has its
+        // own half-version of either.
+        release: () => this.#releaseSessionBinding(key),
+        startNew: () => this.#startNewSession(key),
       });
     } catch (error) {
       this.#logger.error?.(

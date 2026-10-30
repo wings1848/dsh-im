@@ -153,4 +153,12 @@ export default {
   '模型与预设': 'Models and presets',
   '任务与状态': 'Tasks and status',
   '其他': 'Other',
+  // Session card action strip (P1-4).
+  '🔓 解绑当前会话': '🔓 Unbind this session',
+  '已解绑会话。下一条消息会自动开启新会话。': 'Session unbound. Your next message starts a new one automatically.',
+  '已解绑。': 'Unbound.',
+  '已开启新会话。': 'New session started.',
+  '操作没有完成，请稍后重试或直接发送命令。': 'The action did not finish; retry or send the command directly.',
+  '这个渠道暂时不能从卡片里执行该操作，请直接发送命令。': 'This action is not available from the card here; send the command directly.',
+  '已完成。': 'Done.',
 };
