@@ -87,6 +87,16 @@
    的 worktree 里）。这次按需补齐：只放回仍存活的 `claimed` 卡，已 resolved/expired 的
    绝不复活。
 
+## 第七批新增：`disabled` 标签按钮（Bot API 10.3）
+
+| 命令 | 期望 | 实测 |
+| --- | --- | --- |
+| `/models` | 分组头 / 页码 / 到头的翻页键 / 当前项 灰显不可点，其它模型行照常可点 | ✅ 真机一眼可分：「DeepSeek」「Bifrost - CommandCode Chat」两个分组头灰显；「第 1/4 页」「上一页」灰显；「✓ 5. GLM-5.3」灰显带 ✓；其余 1/2/3/4/6/7/8 保持正常按钮态（`12-disabled-labels-live.png`） |
+
+这是本机第一次确认 Bot API 10.3 的 `DisabledButton` 在 Telegram Desktop 7.3.3
+上确实按官方描述渲染（灰显、不发回调）。**升级风险已排除**：即使某个老客户端
+忽略 `disabled`，退化表现也只是「灰按钮变回可点但无响应」，不会报错。
+
 ## 未在本轮验证（需要特定触发条件）
 
 - 审批按钮卡：需要一次真实工具审批。隔离工作区为空、模型为只读问答，未触发 `approval/requested`。
