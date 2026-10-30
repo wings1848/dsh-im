@@ -98,4 +98,8 @@ export default {
   '正在绑定会话，请稍候。': 'Binding the Session, one moment.',
   '暂时无法更新会话列表，请重新发送 /sessionlist。':
     'Could not update the session list right now. Send /sessionlist again.',
+  // Telegram Agent Preset picker (batch 2-C).
+  '选择要使用的 Agent Preset（共 {count} 个）': 'Choose an Agent Preset ({count} available)',
+  '当前选择：{preset}': 'Current choice: {preset}',
+  '当前选择：跟随 Host 默认': 'Current choice: follow the Host default',
 };

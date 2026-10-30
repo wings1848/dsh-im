@@ -215,6 +215,7 @@ export class TextHarnessBridge {
   #workspaceCardKeys = new Map();
   // Optional channel-supplied session picker (same shape as the workspace one:
   // parse/render plus a registry that owns the press lifecycle).
+  #presetCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
@@ -250,6 +251,7 @@ export class TextHarnessBridge {
     keepaliveIntervalMs = 4_000,
     interactionCard = null,
     workspaceCard = null,
+    presetCard = null,
     sessionCard = null,
     approvalCard = null,
     modelCard = null,
@@ -276,6 +278,7 @@ export class TextHarnessBridge {
     this.#keepaliveIntervalMs = keepaliveIntervalMs;
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
+    this.#presetCard = presetCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
     this.#modelCard = modelCard ?? null;
@@ -1027,6 +1030,12 @@ export class TextHarnessBridge {
         this.#status.lastError = null;
         return;
       }
+      // /presetlist may carry the same catalog as a keyboard. A refused or
+      // unrenderable card falls through to the unchanged text listing.
+      if (result?.presetCatalog && await this.#presentPresetCard(target, result, key)) {
+        this.#status.lastError = null;
+        return;
+      }
       for (const reply of result?.messages ?? [result?.message]) {
         if (reply) await this.#bot.sendText(target, reply);
       }
@@ -1044,6 +1053,31 @@ export class TextHarnessBridge {
         messageFailureDiagnostic(error, failure),
       );
       await this.#bot.sendText(target, messageFailureText(failure)).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Present a read-only `/presetlist` result as a picker card.
+   * Returns false so the caller sends the unchanged text listing: a channel
+   * without keyboard support, an unrenderable snapshot or a refused card send
+   * must never lose the command output.
+   */
+  async #presentPresetCard(target, result, key) {
+    if (!this.#presetCard || typeof this.#presetCard.present !== 'function') return false;
+    try {
+      return await this.#presetCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey: key,
+        presetCatalog: result.presetCatalog,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present an Agent Preset picker; `
+        + 'falling back to the text listing:',
+        error?.message ?? error,
+      );
+      return false;
     }
   }
 
@@ -1918,6 +1952,29 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // Agent Preset pickers replay the typed /preset command, so a press can never
+    // invent a switch the command itself would refuse.
+    if (this.#presetCard && typeof this.#presetCard.handlePress === 'function') {
+      const handled = await this.#presetCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        apply: (command, presetKey) => runPresetCommand(
+          command,
+          this.#harness,
+          this.#state,
+          presetKey,
+          { signal: this.#signal },
+        ),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle an Agent Preset card press:`,
           error,
         );
         return false;
