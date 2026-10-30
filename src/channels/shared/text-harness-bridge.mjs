@@ -186,6 +186,20 @@ function pendingMessageId(key, messageId) {
 
 const PENDING_RESTART_NOTICE = '排队中的消息在服务重启时被中断。为避免重复执行，未自动重放；如果该消息尚未处理，请重新发送。';
 
+/**
+ * True when `command` is exactly this slash command, optionally followed by
+ * whitespace. Used by commands that take no arguments, so a stray word is
+ * reported instead of being sent to the model as a question.
+ */
+function isBareCommand(command, name) {
+  return command === name || command.startsWith(`${name} `) || command.startsWith(`${name}\t`);
+}
+
+/** True when a bare command carries words after it. */
+function hasExtraArguments(command, name) {
+  return command.slice(name.length).trim().length > 0;
+}
+
 export class TextHarnessBridge {
   #descriptor;
   #bot;
@@ -1533,7 +1547,15 @@ export class TextHarnessBridge {
         return;
       }
       const command = text.toLowerCase();
-      if (!hasImages && !hasFiles && command === '/help') {
+      // A typed command with stray words used to fall through to the plain-text
+      // path, i.e. it was sent to the model as a question and answered with an
+      // internal error. Match the command plus optional trailing whitespace, and
+      // answer a real usage error when something follows it.
+      if (!hasImages && !hasFiles && isBareCommand(command, '/help')) {
+        if (hasExtraArguments(command, '/help')) {
+          await this.#bot.sendText(target, t('用法：/help（不带参数）'));
+          return;
+        }
         // A keyboard channel gets the sectioned card; the exact text below stays
         // the answer everywhere else (and whenever the card cannot be delivered),
         // because it is a pinned cross-channel regression.
@@ -1546,7 +1568,11 @@ export class TextHarnessBridge {
         ].join('\n'));
         return;
       }
-      if (!hasImages && !hasFiles && command === '/status') {
+      if (!hasImages && !hasFiles && isBareCommand(command, '/status')) {
+        if (hasExtraArguments(command, '/status')) {
+          await this.#bot.sendText(target, t('用法：/status（不带参数）'));
+          return;
+        }
         const status = await runStatusCommand({
           descriptor: this.#descriptor,
           harness: this.#harness,
@@ -1600,7 +1626,11 @@ export class TextHarnessBridge {
         }
         return;
       }
-      if (!hasImages && !hasFiles && command === '/new') {
+      if (!hasImages && !hasFiles && isBareCommand(command, '/new')) {
+        if (hasExtraArguments(command, '/new')) {
+          await this.#bot.sendText(target, t('用法：/new（不带参数）'));
+          return;
+        }
         await this.#state.clearSession(conversationKey);
         if (this.#contextHooks?.onSessionCleared) {
           try {

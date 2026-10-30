@@ -4046,3 +4046,62 @@ test('an over-budget follow-up that falls back to the queue stays readable in th
   assert.deepEqual(retired, [{ conversationKey: 'group:room-budget-hook', messageId: 'budget-hook-one' }],
     'only the steered bubble is retired; the queued follow-up still owes its own turn and stays in the window');
 });
+
+/* ---------------------------------------------------------------------------
+ * Argument-less commands with stray words
+ *
+ * A typed `/help 工作区` used to fall through every command guard (they all
+ * compared with `===`) and be submitted to the model as a question, which
+ * answered with an internal error reference. A misspelled command must come back
+ * as a usage line, not as a paid model turn.
+ * ------------------------------------------------------------------------- */
+
+for (const [command, label] of [['/help', '帮助'], ['/status', '状态'], ['/new', '新会话']]) {
+  test(`${command} with stray words answers a usage line instead of reaching the model`, async () => {
+    const sent = [];
+    let asked = 0;
+    const bridge = createBridge({
+      harness: {
+        async ensureRunning() {},
+        currentWorkspace: () => '/tmp/ws-bridge',
+        currentConversationWorkspace: () => '/tmp/ws-bridge',
+        async ask() { asked += 1; return 'model reply'; },
+        async createSession() { return 'session-new'; },
+      },
+      state: stateFixture({ 'direct:chat-args': 'session-abcdef1234567890' }).state,
+      bot: { async sendText(_target, text) { sent.push(text); } },
+    });
+    await bridge.accept(message('args-1', `${command} extra words`, {
+      conversationId: 'chat-args',
+    }));
+    assert.equal(asked, 0, `${command} with arguments must not become a model turn`);
+    assert.equal(sent.length, 1, 'exactly one reply');
+    assert.match(sent[0], /用法：/u, sent[0]);
+    assert.match(sent[0], new RegExp(command.replace('/', '\\/'), 'u'), sent[0]);
+  });
+}
+
+test('the bare form of those commands still works', async () => {
+  const sent = [];
+  const bridge = createBridge({
+    harness: { async ensureRunning() {} },
+    state: stateFixture({ 'direct:chat-args2': null }).state,
+    bot: { async sendText(_target, text) { sent.push(text); } },
+  });
+  await bridge.accept(message('args-2', '/help', { conversationId: 'chat-args2' }));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /DeepSeek Harness/u, 'the real help text still comes back');
+});
+
+test('trailing whitespace on a bare command is still the bare command', async () => {
+  const sent = [];
+  const bridge = createBridge({
+    harness: { async ensureRunning() {} },
+    state: stateFixture({ 'direct:chat-args3': null }).state,
+    bot: { async sendText(_target, text) { sent.push(text); } },
+  });
+  await bridge.accept(message('args-3', '/help   ', { conversationId: 'chat-args3' }));
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /DeepSeek Harness/u);
+  assert.doesNotMatch(sent[0], /用法：/u, 'trailing spaces are not arguments');
+});

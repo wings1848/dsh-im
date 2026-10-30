@@ -195,4 +195,8 @@ export default {
   '本对话工作区已切换。': "This conversation's workspace was switched.",
   '已清除对话专属工作区。': 'The conversation pin was cleared.',
   '操作没有完成，请直接发送 /conv 命令。': 'The action did not finish; send the /conv command directly.',
+  // Argument-less commands reject stray words instead of asking the model.
+  '用法：/help（不带参数）': 'Usage: /help (no arguments)',
+  '用法：/status（不带参数）': 'Usage: /status (no arguments)',
+  '用法：/new（不带参数）': 'Usage: /new (no arguments)',
 };
