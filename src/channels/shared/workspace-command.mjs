@@ -471,6 +471,7 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
   }
   const argument = THREAD_WORKSPACE_COMMAND.exec(command)?.[1]?.trim() ?? '';
   if (!argument) {
+    let conversationListing = null;
     try {
       const current = harness.currentConversationWorkspace(conversationKey);
       harness.assertWorkspaceScope?.();
@@ -490,10 +491,15 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
             lines.push(`${index + 1}. ${workspace}${workspace === current ? t('（当前）') : ''}`);
           }
         }
+        // `conversationWorkspaceListing` is the machine-readable half a channel may
+        // render as a picker; the text above stays authoritative and byte-stable.
+        conversationListing = { current, bound, paths };
       } catch { /* 列表拿不到不影响主信息 */ }
       lines.push('', t('用法：/conv 工作区序号或绝对路径'), t('清除：/conv clear'));
       const message = lines.join('\n');
-      return commandResult(message, splitWorkspaceCommandMessage(message));
+      return commandResult(message, splitWorkspaceCommandMessage(message), {
+        ...(conversationListing ? { conversationWorkspaceListing: conversationListing } : {}),
+      });
     } catch (error) {
       if (error?.code === 'workspace-bot-not-found') {
         return commandResult(t('机器人正在移除或已重新接入，无法读取对话工作区。'));

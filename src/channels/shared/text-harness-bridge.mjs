@@ -13,7 +13,11 @@ import {
   captureContextEnhancementSource,
   enhanceContextContent,
 } from './context-enhancement.mjs';
-import { runWorkspaceCommand, workspaceSwitchFailureText } from './workspace-command.mjs';
+import {
+  isWorkspaceCommand,
+  runWorkspaceCommand,
+  workspaceSwitchFailureText,
+} from './workspace-command.mjs';
 import { runStatusCommand } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
@@ -220,6 +224,7 @@ export class TextHarnessBridge {
   #menuCard;
   #helpCard;
   #statusCard;
+  #convCard;
   #clearCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
@@ -260,6 +265,7 @@ export class TextHarnessBridge {
     menuCard = null,
     helpCard = null,
     statusCard = null,
+    convCard = null,
     clearCard = null,
     sessionCard = null,
     approvalCard = null,
@@ -291,6 +297,7 @@ export class TextHarnessBridge {
     this.#menuCard = menuCard ?? null;
     this.#helpCard = helpCard ?? null;
     this.#statusCard = statusCard ?? null;
+    this.#convCard = convCard ?? null;
     this.#clearCard = clearCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
@@ -1239,6 +1246,31 @@ export class TextHarnessBridge {
    * exact text help instead, so `/help` keeps its pinned output on every channel
    * that cannot show a keyboard.
    */
+  /**
+   * Send the `/conv` card (Telegram only). Returns true when it was delivered.
+   * A channel without a keyboard, an unrenderable listing or a refused send keeps
+   * the caller's text output, so `/conv` is never a dead end.
+   */
+  async #presentConvCard(target, listing, conversationKey) {
+    if (!this.#convCard || typeof this.#convCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#convCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        listing,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /conv card; `
+        + 'falling back to the text output:',
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
+
   /** Read the current /status snapshot without sending anything. */
   async #readStatusSnapshot(conversationKey) {
     try {
@@ -1555,6 +1587,13 @@ export class TextHarnessBridge {
       if (workspaceCommand && await this.#presentSessionCommand(
         target, workspaceCommand, conversationKey,
       )) return;
+      // `/conv` is the *conversation-scoped* workspace. Its card is deliberately
+      // separate from `/ws` (which changes the bot default) so the two commands
+      // cannot be confused; a refused card keeps the text output below.
+      if (workspaceCommand?.conversationWorkspaceListing
+        && await this.#presentConvCard(
+          target, workspaceCommand.conversationWorkspaceListing, conversationKey,
+        )) return;
       if (workspaceCommand) {
         for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
           await this.#bot.sendText(target, reply);
@@ -2259,6 +2298,24 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /conv card pins this conversation's workspace. It replays `/conv <path>`
+    // and `/conv clear`, so the card can never change the bot-wide default (/ws).
+    if (this.#convCard && typeof this.#convCard.handlePress === 'function') {
+      const handled = await this.#convCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        switchTo: (command) => this.#runMenuEntry(command, key),
+        clear: () => this.#runMenuEntry('/conv clear', key),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /conv press:`,
           error,
         );
         return false;
