@@ -216,6 +216,7 @@ export class TextHarnessBridge {
   // Optional channel-supplied session picker (same shape as the workspace one:
   // parse/render plus a registry that owns the press lifecycle).
   #presetCard;
+  #clearCard;
   #sessionCard;
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
@@ -252,6 +253,7 @@ export class TextHarnessBridge {
     interactionCard = null,
     workspaceCard = null,
     presetCard = null,
+    clearCard = null,
     sessionCard = null,
     approvalCard = null,
     modelCard = null,
@@ -279,6 +281,7 @@ export class TextHarnessBridge {
     this.#interactionCard = interactionCard ?? null;
     this.#workspaceCard = workspaceCard ?? null;
     this.#presetCard = presetCard ?? null;
+    this.#clearCard = clearCard ?? null;
     this.#sessionCard = sessionCard ?? null;
     this.#approvalCard = approvalCard ?? null;
     this.#modelCard = modelCard ?? null;
@@ -392,7 +395,7 @@ export class TextHarnessBridge {
     return processing;
   }
 
-  #acceptAcceptedMessage(normalized, messageId, senderId, busyMessageMode) {
+  async #acceptAcceptedMessage(normalized, messageId, senderId, busyMessageMode) {
     if (normalized.kind === 'direct') {
       rememberConnectionTestTarget(
         this.#state,
@@ -469,6 +472,16 @@ export class TextHarnessBridge {
     }
     const collectingBatch = normalized.kind === 'direct'
       && this.#batches.status(key).phase === 'collecting';
+    // `/clear` throws the conversation context away and cannot be undone, so a
+    // channel that can show a keyboard asks once first. A channel without one (or
+    // a refused card send) runs the command immediately, exactly as before.
+    if (isClearCommand(text)
+      && !collectingBatch
+      && (normalized.kind !== 'group' || normalized.addressed === true)
+      && await this.#presentClearConfirmation(normalized, messageId, key)) {
+      this.#acceptedMessageIds.delete(messageId);
+      return;
+    }
     const commandRunner = collectingBatch ? null : isClearCommand(text) ? runClearCommand
       : isHistoryCommand(text) ? runHistoryCommand
       : hasInboundFiles(normalized) ? null : isControlCommand(text)
@@ -1062,6 +1075,66 @@ export class TextHarnessBridge {
    * without keyboard support, an unrenderable snapshot or a refused card send
    * must never lose the command output.
    */
+  /**
+   * Ask before running `/clear`.
+   *
+   * Returns true when the confirmation was delivered, which means the caller
+   * must NOT run the command now: the card's 「清空」press runs it instead.
+   * Returns false for any channel that cannot show a keyboard and for a refused
+   * send, so `/clear` keeps its immediate behaviour everywhere else.
+   */
+  async #presentClearConfirmation(message, messageId, key) {
+    if (!this.#clearCard || typeof this.#clearCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    // Nothing bound yet: the command's own message explains that better.
+    let sessionId = null;
+    try {
+      sessionId = typeof this.#state?.sessionFor === 'function'
+        ? this.#state.sessionFor(key)
+        : null;
+    } catch {
+      sessionId = null;
+    }
+    if (typeof sessionId !== 'string' || !sessionId) return false;
+    let workspace = null;
+    try {
+      workspace = typeof this.#harness?.currentConversationWorkspace === 'function'
+        ? this.#harness.currentConversationWorkspace(key)
+        : null;
+      workspace = workspace || (typeof this.#harness?.currentWorkspace === 'function'
+        ? this.#harness.currentWorkspace()
+        : null);
+    } catch {
+      workspace = null;
+    }
+    let presented = false;
+    try {
+      presented = await this.#clearCard.present({
+        bot: this.#bot,
+        target: message.replyTarget,
+        conversationKey: key,
+        workspace: typeof workspace === 'string' ? workspace : null,
+        sessionId,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /clear confirmation; `
+        + 'running /clear immediately:',
+        error?.message ?? error,
+      );
+      presented = false;
+    }
+    if (presented) {
+      // Only now is this message really handled: a refused card leaves the
+      // typed command to run normally, so it must not be marked as consumed.
+      if (typeof this.#state?.markSeen === 'function') await this.#state.markSeen(messageId);
+      this.#status.messagesReceived += 1;
+      this.#status.lastMessageAt = new Date().toISOString();
+      this.#status.lastError = null;
+    }
+    return presented;
+  }
+
   async #presentPresetCard(target, result, key) {
     if (!this.#presetCard || typeof this.#presetCard.present !== 'function') return false;
     try {
@@ -1952,6 +2025,25 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a model picker press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /clear confirmation owns its own namespace: 清空 runs the real command,
+    // 取消 does nothing, and anything else keeps falling through to the paths below.
+    if (this.#clearCard && typeof this.#clearCard.handlePress === 'function') {
+      const handled = await this.#clearCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: () => runClearCommand('/clear', this.#harness, this.#state, key, {
+          signal: this.#signal,
+        }),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /clear confirmation press:`,
           error,
         );
         return false;
