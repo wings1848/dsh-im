@@ -40,13 +40,32 @@ const HOME = 'home';
 /** Commands that are not a section of their own but belong in 「其他」. */
 const OTHER = 'other';
 
-const SECTION_LABEL = Object.freeze({
+/** Button label per section, with the emoji the card shows. */
+const SECTION_BUTTON_LABEL = Object.freeze({
   [COMMAND_HELP_GROUPS.session]: '💬 会话',
   [COMMAND_HELP_GROUPS.workspace]: '📁 工作区',
   [COMMAND_HELP_GROUPS.model]: '🤖 模型与预设',
   [COMMAND_HELP_GROUPS.task]: '⚙️ 任务与状态',
   [OTHER]: '📦 其他',
 });
+
+/** Body title per section (no emoji: the body is a plain list of usage lines). */
+const SECTION_TITLE = Object.freeze({
+  [COMMAND_HELP_GROUPS.session]: '会话',
+  [COMMAND_HELP_GROUPS.workspace]: '工作区',
+  [COMMAND_HELP_GROUPS.model]: '模型与预设',
+  [COMMAND_HELP_GROUPS.task]: '任务与状态',
+  [OTHER]: '其他',
+});
+
+/** The one place a section's display strings are resolved. */
+function sectionLabel(group) {
+  return SECTION_BUTTON_LABEL[group] ?? group;
+}
+
+function sectionTitle(group) {
+  return SECTION_TITLE[group] ?? group;
+}
 
 /**
  * The order sections appear in. `other` is last and only rendered when it has
@@ -90,22 +109,11 @@ export function helpHomeText(sections) {
 
 /** The section body: each command's usage lines, translated. */
 export function helpSectionText(section) {
-  const lines = [t(_labelKey(section.group))];
+  const lines = [t(sectionTitle(section.group))];
   for (const item of section.items) {
     for (const line of item.lines) lines.push(t(line));
   }
   return lines.join('\n');
-}
-
-/** Section titles are their own translation keys so a language can rename them. */
-function _labelKey(group) {
-  switch (group) {
-    case COMMAND_HELP_GROUPS.session: return '会话';
-    case COMMAND_HELP_GROUPS.workspace: return '工作区';
-    case COMMAND_HELP_GROUPS.model: return '模型与预设';
-    case COMMAND_HELP_GROUPS.task: return '任务与状态';
-    default: return '其他';
-  }
 }
 
 /**
@@ -116,7 +124,7 @@ export function renderHelpHome(sections, nonce) {
   const callback = (action) => TELEGRAM_HELP_CARD_CALLBACK.encode({ nonce, action });
   const rows = [];
   const buttons = sections.map((section) => ({
-    text: truncateButtonText(`${section.label}（${section.items.length}）`),
+    text: truncateButtonText(`${t(sectionLabel(section.group))}（${section.items.length}）`),
     callback_data: callback(section.group),
   }));
   for (let index = 0; index < buttons.length; index += 2) {

@@ -109,6 +109,16 @@ test('the home screen counts commands and offers one button per section', () => 
   const buttons = rows.flat();
   // One entry per section plus the /menu shortcut.
   assert.equal(buttons.length, sections.length + 1);
+  // Every button has real text: a label that resolves to undefined renders as
+  // "undefined (6)" on a device, which is exactly the bug this pins down.
+  for (const button of buttons) {
+    assert.doesNotMatch(button.text, /undefined|null|\[object/u, button.text);
+    assert.ok(button.text.trim().length > 1, button.text);
+  }
+  // A section button names its section and its command count.
+  const sessionIndex = sections.findIndex((section) => section.group === 'session');
+  assert.ok(sessionIndex >= 0);
+  assert.match(buttons[sessionIndex].text, /会话（\d+）/u);
   for (const button of buttons) {
     assert.ok(Buffer.byteLength(button.callback_data, 'utf8') <= 64, button.callback_data);
     assert.match(button.callback_data, /^h1\|abcd1234EFGH\|/u);
