@@ -2172,26 +2172,6 @@ export class TextHarnessBridge {
     // adapter owns the nonce registry and the bind-after-claim lifecycle.
     const sessionPress = this.#sessionCard?.parse?.(callback.data) ?? null;
     if (sessionPress) return this.#handleSessionCardPress(callback, key);
-    // Approval cards own their callback namespace; every other press keeps using
-    // the question-card path below. The card acknowledges the press itself (the
-    // ack must be the first round-trip), so this branch runs before any other
-    // work in acceptCallback.
-    if (this.#approvalCard && typeof this.#approvalCard.handlePress === 'function') {
-      const handled = await this.#approvalCard.handlePress(callback, {
-        bot: this.#bot,
-        answer: (text) => this.#answerInteractionCallback(callback, text),
-        submit: (approvalId, outcome, options) => (
-          this.#approvals.submitByApprovalId(approvalId, outcome, options)
-        ),
-      }).catch((error) => {
-        this.#logger.error?.(
-          `[dsh-im:${this.#descriptor.key}] failed to handle an approval card press:`,
-          error,
-        );
-        return false;
-      });
-      if (handled) return;
-    }
     const pending = this.#pendingInteractions.get(key);
     const notice = (text) => this.#answerInteractionCallback(callback, text);
     if (!pending) return notice(t('该问题已处理，无需再次选择。'));
@@ -2813,12 +2793,6 @@ export class TextHarnessBridge {
 
 
   /**
-   * Present a read-only `/presetlist` result as a picker card.
-   * Returns false so the caller sends the unchanged text listing: a channel
-   * without keyboard support, an unrenderable snapshot or a refused card send
-   * must never lose the command output.
-   */
-  /**
    * Ask before running `/clear`.
    *
    * Returns true when the confirmation was delivered, which means the caller
@@ -2985,13 +2959,6 @@ export class TextHarnessBridge {
 
 
   /**
-   * Send the sectioned `/help` card (Telegram only).
-   *
-   * Returns true when the card was delivered. False means the caller sends the
-   * exact text help instead, so `/help` keeps its pinned output on every channel
-   * that cannot show a keyboard.
-   */
-  /**
    * Send the `/conv` card (Telegram only). Returns true when it was delivered.
    * A channel without a keyboard, an unrenderable listing or a refused send keeps
    * the caller's text output, so `/conv` is never a dead end.
@@ -3017,16 +2984,6 @@ export class TextHarnessBridge {
   }
 
 
-  /**
-   * Send the `/menu` hub (Telegram only).
-   *
-   * Returns true when the hub was delivered. False means the caller must answer
-   * `/menu` with the text path instead, so the command always produces output.
-   *
-   * The snapshot is assembled from data the bridge already reads elsewhere
-   * (`/status`, the workspace switches), each field independently optional: a
-   * Host that cannot answer one of them still gets a usable hub.
-   */
   /**
    * Replay one `/menu` entry's command through the same runners the typed
    * command uses, so the hub can never invent behaviour a command lacks.
@@ -3116,11 +3073,6 @@ export class TextHarnessBridge {
   }
 
 
-  /**
-   * Route one session-picker press. The adapter owns the nonce lifecycle; the
-   * bridge only supplies the command gate (a card is a command surface) and the
-   * same typed bind path the text command uses.
-   */
   /**
    * Drop this conversation's Session binding (the 解绑 row).
    *

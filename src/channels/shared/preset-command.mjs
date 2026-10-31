@@ -29,11 +29,6 @@ export const PRESET_LIST_SNAPSHOT_MAX_ENTRIES = COMMAND_LIST_MAX_ENTRIES;
  * (null = follow the host default) and is carried next to the normalized
  * catalog so the card can mark the current row without a second RPC.
  */
-/**
- * The catalog a picker card renders. `agentPreset` is the bot's current choice
- * (null = follow the host default) and is carried next to the normalized
- * catalog so the card can mark the current row without a second RPC.
- */
 function presetCardCatalog(current) {
   return {
     agentPreset: current.agentPreset,
