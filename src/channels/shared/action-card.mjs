@@ -135,6 +135,33 @@ export function actionCardStateText(status, texts = {}) {
  * `maxEntries` cards are remembered (oldest is evicted first) and a new card in
  * a conversation supersedes the previous live one.
  */
+/** Telegram truncates button labels itself; we never want to rely on that. */
+export const ACTION_CARD_BUTTON_TEXT_MAX = 60;
+
+const UNSAFE_BUTTON_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
+
+/**
+ * Make arbitrary text safe to put on a button.
+ *
+ * Workspace paths, session titles and preset labels all reach buttons, and any
+ * of them can carry control characters or newlines that would break the layout
+ * (or, for a bidirectional override, reorder what the user reads). Every card did
+ * this slightly differently — one of them skipped the control-character pass —
+ * so it lives here now and all of them call it.
+ */
+export function safeButtonText(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(UNSAFE_BUTTON_TEXT, ' ').replace(/\s+/gu, ' ').trim();
+}
+
+/** `safeButtonText` plus the ellipsis every button label needs. */
+export function truncateButtonText(value) {
+  const text = safeButtonText(value) || '•';
+  return text.length > ACTION_CARD_BUTTON_TEXT_MAX
+    ? `${text.slice(0, ACTION_CARD_BUTTON_TEXT_MAX - 1)}…`
+    : text;
+}
+
 /**
  * Longest we will wait for a rate-limited card operation.
  *

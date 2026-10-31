@@ -5,6 +5,7 @@ import {
   actionCardStateText,
   createCallbackNamespace,
   withActionCardRetry,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 
 /**
@@ -35,7 +36,6 @@ export const TELEGRAM_CLEAR_CARD_CALLBACK = createCallbackNamespace(
 /** A confirmation prompt older than this no longer describes the chat's state. */
 export const TELEGRAM_CLEAR_CARD_TTL_MS = 5 * 60 * 1000;
 const MAX_CARD_RECORDS = 64;
-const MAX_BUTTON_TEXT = 60;
 
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 
@@ -58,12 +58,6 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.REVOKED]: '这条清空确认已失效，请重新发送 /clear。',
   [ACTION_CARD_STATUS.UNKNOWN]: '这条清空确认已失效或不存在，发送 /clear 可重新发起。',
 });
-
-function truncateButtonText(value) {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) return '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
 
 /**
  * The card body. It has to say what survives the clear, because "清空上下文" reads

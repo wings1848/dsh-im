@@ -207,7 +207,6 @@ test('picking a workspace pins this conversation only', async () => {
   await bridge.accept(convMessage());
   assert.ok(A && B, `fixtures must be set: A=${A} B=${B}`);
   assert.equal(cards.length, 1);
-  console.error('ROWS=', JSON.stringify(cards[0].markup.inline_keyboard.map((r) => r.map((b) => b.text))));
   const second = cards[0].markup.inline_keyboard[1][0];
   await bridge.acceptCallback(callbackFor(second.callback_data));
 

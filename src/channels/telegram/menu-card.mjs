@@ -4,6 +4,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 
 /**
@@ -63,9 +64,7 @@ const LABEL_BY_ACTION = Object.freeze({
 
 export const TELEGRAM_MENU_CARD_TTL_MS = 30 * 60 * 1000;
 const MAX_CARD_RECORDS = 64;
-const MAX_BUTTON_TEXT = 60;
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
-const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
 const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.CLAIMED]: '正在打开，请稍候。',
@@ -81,16 +80,6 @@ const NOTICES = Object.freeze({
   opened: '已打开：{label}',
   failed: '暂时无法打开，请直接发送命令。',
 });
-
-function safeDisplayText(value) {
-  if (typeof value !== 'string') return '';
-  return value.replace(UNSAFE_DISPLAY_TEXT_GLOBAL, ' ').replace(/\s+/gu, ' ').trim();
-}
-
-function truncateButtonText(value) {
-  const text = safeDisplayText(value) || '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
 
 /** The short last-path segment, which is what makes a workspace recognizable. */
 function workspaceName(path) {

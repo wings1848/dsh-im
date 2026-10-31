@@ -5,6 +5,8 @@ import {
   actionCardStateText,
   createCallbackNamespace,
   withActionCardRetry,
+  safeButtonText,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 
 /**
@@ -32,9 +34,7 @@ export const TELEGRAM_STATUS_CARD_CALLBACK = createCallbackNamespace(
 
 export const TELEGRAM_STATUS_CARD_TTL_MS = 30 * 60 * 1000;
 const MAX_CARD_RECORDS = 64;
-const MAX_BUTTON_TEXT = 60;
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
-const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
 /** One action per entry; `refresh` re-reads the snapshot, the rest open pickers. */
 export const TELEGRAM_STATUS_ACTIONS = Object.freeze({
@@ -83,18 +83,9 @@ const NOTICES = Object.freeze({
   openFailed: '暂时无法打开，请直接发送命令。',
 });
 
-function safeDisplayText(value) {
-  return typeof value === 'string' ? value.replace(UNSAFE_DISPLAY_TEXT_GLOBAL, ' ').trim() : '';
-}
-
-function truncateButtonText(value) {
-  const text = safeDisplayText(value) || '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
-
 /** The last path segment, which is what makes a workspace recognizable. */
 function workspaceName(path) {
-  const text = safeDisplayText(path).replace(/\/+$/u, '');
+  const text = safeButtonText(path).replace(/\/+$/u, '');
   if (!text) return '';
   return text.slice(text.lastIndexOf('/') + 1) || text;
 }

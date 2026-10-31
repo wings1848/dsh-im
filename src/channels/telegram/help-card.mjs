@@ -6,6 +6,7 @@ import {
   actionCardStateText,
   createCallbackNamespace,
   withActionCardRetry,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 
 /**
@@ -33,7 +34,6 @@ export const TELEGRAM_HELP_CARD_CALLBACK = createCallbackNamespace(
 
 export const TELEGRAM_HELP_CARD_TTL_MS = 30 * 60 * 1000;
 const MAX_CARD_RECORDS = 64;
-const MAX_BUTTON_TEXT = 60;
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 
 /** Home screen sentinel, and the "back to home" action. */
@@ -89,15 +89,6 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.REVOKED]: '这个帮助已失效，发送 /help 可重新打开。',
   [ACTION_CARD_STATUS.UNKNOWN]: '这个帮助已失效或不存在，发送 /help 可重新打开。',
 });
-
-function safeDisplayText(value) {
-  return typeof value === 'string' ? value.replace(/\s+/gu, ' ').trim() : '';
-}
-
-function truncateButtonText(value) {
-  const text = safeDisplayText(value) || '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
 
 /** The home body: one line per section with how many commands it holds. */
 export function helpHomeText(sections) {

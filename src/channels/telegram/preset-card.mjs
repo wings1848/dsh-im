@@ -5,6 +5,8 @@ import {
   actionCardStateText,
   createCallbackNamespace,
   withActionCardRetry,
+  safeButtonText,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 
 /**
@@ -37,12 +39,10 @@ export const TELEGRAM_PRESET_CARD_CALLBACK = createCallbackNamespace(
  */
 export const TELEGRAM_PRESET_CARD_MAX_ITEMS = 60;
 export const TELEGRAM_PRESET_CARD_TTL_MS = 60 * 60 * 1000;
-const MAX_BUTTON_TEXT = 60;
 const MAX_CARD_RECORDS = 64;
 
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 const UNSAFE_DISPLAY_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
-const UNSAFE_DISPLAY_TEXT_GLOBAL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu;
 
 /** The follow-host-default row is a real action, not a catalog entry. */
 const FOLLOW_DEFAULT_ACTION = 'd';
@@ -65,16 +65,6 @@ const NOTICES = Object.freeze({
   refreshFailed: '无法更新 Agent Preset 卡片，请重新发送 /presetlist。',
   staleCommand: '暂时无法应用 Agent Preset，请发送 /preset 命令。',
 });
-
-function safeDisplayText(value) {
-  if (typeof value !== 'string') return '';
-  return value.replace(UNSAFE_DISPLAY_TEXT_GLOBAL, ' ').replace(/\s+/gu, ' ').trim();
-}
-
-function truncateButtonText(value) {
-  const text = safeDisplayText(value) || '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
 
 function catalogItems(catalog) {
   const items = catalog?.items;
@@ -109,7 +99,7 @@ export function presetCardView(catalog) {
   if (currentId) {
     const current = items.find((item) => item.id === currentId);
     lines.push(t('当前选择：{preset}', {
-      preset: current ? `${safeDisplayText(current.label) || current.id}（${current.id}）` : currentId,
+      preset: current ? `${safeButtonText(current.label) || current.id}（${current.id}）` : currentId,
     }));
   } else {
     lines.push(t('当前选择：跟随 Host 默认'));
@@ -119,7 +109,7 @@ export function presetCardView(catalog) {
     items: items.map((item, index) => ({
       index: index + 1,
       id: item.id,
-      label: safeDisplayText(item.label) || item.id,
+      label: safeButtonText(item.label) || item.id,
       current: item.id === effectiveId,
     })),
     currentId,
