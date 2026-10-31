@@ -53,7 +53,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示更新的 Agent Preset 列表，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '该 Agent Preset 列表已失效，请重新发送 /presetlist。',
   [ACTION_CARD_STATUS.REVOKED]: '该 Agent Preset 列表已失效，请重新发送 /presetlist。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '该 Agent Preset 卡片已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '该 Agent Preset 卡片已失效或不存在，发送 /presetlist 可重新打开。',
 });
 
 const NOTICES = Object.freeze({

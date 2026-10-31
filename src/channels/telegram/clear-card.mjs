@@ -55,7 +55,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示新的清空确认，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '这条清空确认已失效，请重新发送 /clear。',
   [ACTION_CARD_STATUS.REVOKED]: '这条清空确认已失效，请重新发送 /clear。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '这条清空确认已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这条清空确认已失效或不存在，发送 /clear 可重新发起。',
 });
 
 function truncateButtonText(value) {

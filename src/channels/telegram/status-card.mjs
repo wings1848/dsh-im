@@ -72,7 +72,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示更新的状态，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '这个状态卡已失效，发送 /status 可刷新。',
   [ACTION_CARD_STATUS.REVOKED]: '这个状态卡已失效，发送 /status 可刷新。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '这个状态卡已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这个状态卡已失效或不存在，发送 /status 可重新打开。',
 });
 
 const NOTICES = Object.freeze({

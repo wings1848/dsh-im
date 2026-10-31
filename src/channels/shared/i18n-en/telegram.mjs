@@ -202,4 +202,12 @@ export default {
   // /status group-chat redaction.
   '工作区：{workspace}（群聊中仅显示末段）': 'Workspace: {workspace} (only the last segment is shown in a group)',
   '当前模型：已设置（群聊中不显示具体名称）': 'Current model: set (the name is hidden in a group)',
+  // Stale-card notices name the command that reopens them.
+  '这个菜单已失效或不存在，发送 /menu 可重新打开。': 'This menu is no longer valid or does not exist; send /menu to open it again.',
+  '这个帮助已失效或不存在，发送 /help 可重新打开。': 'This help is no longer valid or does not exist; send /help to open it again.',
+  '这个状态卡已失效或不存在，发送 /status 可重新打开。': 'This status card is no longer valid or does not exist; send /status to open it again.',
+  '该 Agent Preset 卡片已失效或不存在，发送 /presetlist 可重新打开。': 'This Agent Preset card is no longer valid or does not exist; send /presetlist to open it again.',
+  '这条对话工作区卡已失效或不存在，发送 /conv 可重新打开。': 'This conversation workspace card is no longer valid or does not exist; send /conv to open it again.',
+  '这条清空确认已失效或不存在，发送 /clear 可重新发起。': 'This clear confirmation is no longer valid or does not exist; send /clear to start over.',
+  '这张卡片已失效或不存在，发送 /models 或 /reasoninglist 可重新打开。': 'This card is no longer valid or does not exist; send /models or /reasoninglist to open it again.',
 };

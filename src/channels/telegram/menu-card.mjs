@@ -74,7 +74,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示更新的菜单，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '这个菜单已失效，发送 /menu 可重新打开。',
   [ACTION_CARD_STATUS.REVOKED]: '这个菜单已失效，发送 /menu 可重新打开。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '这个菜单已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这个菜单已失效或不存在，发送 /menu 可重新打开。',
 });
 
 const NOTICES = Object.freeze({

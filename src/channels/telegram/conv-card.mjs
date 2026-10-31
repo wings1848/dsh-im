@@ -46,7 +46,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示更新的对话工作区卡，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '这条对话工作区卡已失效，发送 /conv 可重新打开。',
   [ACTION_CARD_STATUS.REVOKED]: '这条对话工作区卡已失效，发送 /conv 可重新打开。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '这条对话工作区卡已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这条对话工作区卡已失效或不存在，发送 /conv 可重新打开。',
 });
 
 const NOTICES = Object.freeze({

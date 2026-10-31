@@ -86,7 +86,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '已显示更新的帮助，请使用最新一条。',
   [ACTION_CARD_STATUS.STALE]: '这个帮助已失效，发送 /help 可重新打开。',
   [ACTION_CARD_STATUS.REVOKED]: '这个帮助已失效，发送 /help 可重新打开。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '这个帮助已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这个帮助已失效或不存在，发送 /help 可重新打开。',
 });
 
 function safeDisplayText(value) {

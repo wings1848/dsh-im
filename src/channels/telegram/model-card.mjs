@@ -74,7 +74,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
   [ACTION_CARD_STATUS.SUPERSEDED]: '该操作已被新操作取代，请使用最新一张卡片。',
   [ACTION_CARD_STATUS.STALE]: '该列表已变化，请重新发送命令。',
   [ACTION_CARD_STATUS.REVOKED]: '该操作已失效，请重新发送命令。',
-  [ACTION_CARD_STATUS.UNKNOWN]: '该操作已失效或不存在。',
+  [ACTION_CARD_STATUS.UNKNOWN]: '这张卡片已失效或不存在，发送 /models 或 /reasoninglist 可重新打开。',
 });
 
 /**
