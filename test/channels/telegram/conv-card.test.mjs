@@ -349,3 +349,4 @@ test('conv card labels follow the host language', (t) => {
   const card = renderConvCard(listing({ bound: true }), 'abcd1234EFGH');
   assert.match(card.markup.inline_keyboard.at(-1)[0].text, /Clear pin/u);
 });
+

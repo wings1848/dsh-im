@@ -5,6 +5,7 @@ import {
   actionCardStateText,
   createCallbackNamespace,
   withActionCardRetry,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
@@ -53,7 +54,6 @@ export const TELEGRAM_MODEL_CARD_PAGE_SIZE = 8;
 export const TELEGRAM_MODEL_CARD_MAX_ITEMS = 60;
 export const TELEGRAM_MODEL_CARD_TTL_MS = 60 * 60 * 1000;
 /** Telegram-native cards keep their keyboard for at most this long. */
-const MAX_BUTTON_TEXT = 60;
 /** Remembered message ids for keyboards that still need retiring. */
 const MAX_CARD_RECORDS = 64;
 
@@ -95,11 +95,6 @@ function labelButton(text) {
 function displayText(value) {
   if (typeof value !== 'string') return '';
   return value.replace(UNSAFE_DISPLAY_TEXT_GLOBAL, ' ').replace(/\s+/gu, ' ').trim();
-}
-
-function truncateButtonText(value) {
-  const text = displayText(value);
-  return text.length <= MAX_BUTTON_TEXT ? text : `${text.slice(0, MAX_BUTTON_TEXT - 1)}…`;
 }
 
 function modelAt(catalog, provider, model) {

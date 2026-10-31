@@ -5,6 +5,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  truncateButtonText,
 } from '../shared/action-card.mjs';
 import { runWorkspaceCommand } from '../shared/workspace-command.mjs';
 
@@ -33,7 +34,6 @@ export const TELEGRAM_CONV_CARD_CALLBACK = createCallbackNamespace(
 export const TELEGRAM_CONV_CARD_MAX_ITEMS = 40;
 export const TELEGRAM_CONV_CARD_TTL_MS = 30 * 60 * 1000;
 const MAX_CARD_RECORDS = 64;
-const MAX_BUTTON_TEXT = 60;
 const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 const UNSAFE_DISPLAY_TEXT = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
@@ -54,12 +54,6 @@ const NOTICES = Object.freeze({
   cleared: '已清除对话专属工作区。',
   failed: '操作没有完成，请直接发送 /conv 命令。',
 });
-
-function truncateButtonText(value) {
-  const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) return '•';
-  return text.length > MAX_BUTTON_TEXT ? `${text.slice(0, MAX_BUTTON_TEXT - 1)}…` : text;
-}
 
 /**
  * Build the body: which conversation, whether it is pinned, and what happens to
