@@ -1,5 +1,13 @@
 # Telegram 交互优化真机验证记录（wings-gpd 隔离环境，2026-10-30）
 
+> **模型更正（2026-10-31）**：本记录前十二批真机验证所用的模型是
+> `bifrost-chat/commandcode-chat/glim-5.3`（GLM），**不是目标要求的 deepseek v4.1 flash**。
+> 第十三批已切换为 `bifrost-chat/commandcode-chat/deepseek-v4.1-flash` 并复验：
+> 切换成功（`17-model-deepseek-v41-flash.png`）、状态卡确认（`18-status-deepseek-flash.png`）、
+> 真实对话可用（`19-chat-deepseek-flash.png`）。
+> 前十二批的**卡片渲染结论不受影响**（渲染与模型无关），但「用指定模型测过」这一点此前不成立，现已补上。
+
+
 ## 环境
 
 - 设备：wings-gpd（KDE Plasma Wayland，Telegram Desktop 7.3.3 Flatpak）
@@ -182,6 +190,19 @@ nonce（读详情不消耗唯一一次决定机会）。这条不变量有专门
 - 一条**覆盖检查**：扫描 `src` 下所有 `createCallbackNamespace('xx')`，断言每个前缀都有用例。
   这条当场抓到漏掉的 `r2`（推理卡与模型卡共用适配器但命名空间独立）
 - 红证：改回 `/menu` 那条文案，对应用例立即失败
+
+## 第十三批：切换到目标模型 deepseek-v4.1-flash 复验
+
+| 项目 | 期望 | 实测 |
+| --- | --- | --- |
+| `/models` 能看到目标模型 | 列表里有 DeepSeek V4.1 Flash | ✅ 「4. DeepSeek V4.1 Flash」在 Bifrost-CommandCode Chat 组下 |
+| `/model 4` 切换 | 切到 deepseek-v4.1-flash | ✅ 「模型已切换为：bifrost-chat/commandcode-chat/deepseek-v4.1-flash」（`17-…png`） |
+| `/status` 确认 | 状态卡显示新模型 | ✅ 「当前模型：bifrost-chat/commandcode-chat/deepseek-v4.1-flash」（`18-…png`） |
+| 真实对话 | 模型正常应答 | ✅ 回复「你好，我在这儿，随时可以开始。」（`19-…png`） |
+
+**这修正了此前的一个遗漏**：目标一直要求用 bifrost 接入的 commandcode deepseek v4.1 flash
+测试，但前十二批真机验证实际用的是 GLM 5.3。卡片渲染结论与模型无关，所以不受影响；
+但「用指定模型测过」现在才真正成立。
 
 ## 未在本轮验证（需要特定触发条件）
 
