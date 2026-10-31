@@ -135,6 +135,56 @@ export function actionCardStateText(status, texts = {}) {
  * `maxEntries` cards are remembered (oldest is evicted first) and a new card in
  * a conversation supersedes the previous live one.
  */
+/**
+ * Longest we will wait for a rate-limited card operation.
+ *
+ * Telegram answers a throttled call with `retry_after` and expects the bot to
+ * come back then. A card edit is cheap and user-initiated (they just pressed a
+ * button), so waiting a few seconds and trying once more is much better than
+ * telling them "could not update, send the command again". Anything longer than
+ * this is not worth holding the turn open: the caller falls back.
+ */
+export const ACTION_CARD_RETRY_MAX_WAIT_MS = 5_000;
+
+/** `retry_after` in milliseconds, read from either spelling Telegram uses. */
+function rateLimitDelayMs(error) {
+  const value = error?.retry_after ?? error?.retryAfter;
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return Math.ceil(seconds * 1_000);
+}
+
+function isRateLimited(error) {
+  const code = Number(error?.providerCode ?? error?.status);
+  return code === 429 || error?.code === 'telegram-429';
+}
+
+/**
+ * Run one Telegram card operation, honouring a 429 exactly once.
+ *
+ * Every card paid for this separately before: a throttled edit surfaced as
+ * "无法更新卡片，请重新发送命令" even though Telegram had just said when to retry.
+ * This helper makes that recovery the default for all cards.
+ *
+ * Returns the operation's result, or rethrows the last error.
+ */
+export async function withActionCardRetry(operation, {
+  maxWaitMs = ACTION_CARD_RETRY_MAX_WAIT_MS,
+} = {}) {
+  try {
+    return await operation();
+  } catch (error) {
+    const delay = isRateLimited(error) ? rateLimitDelayMs(error) : null;
+    // Only a short, explicit, known wait is worth taking; anything else is the
+    // caller's failure to report.
+    if (delay === null || delay > maxWaitMs) throw error;
+    // Deliberately NOT unref'd: a throttled retry is the only thing this call is
+    // waiting for, so the timer must keep the loop alive until it fires.
+    await new Promise((resolve) => { setTimeout(resolve, delay); });
+    return operation();
+  }
+}
+
 export class ActionCardRegistry {
   #ttlMs;
   #maxEntries;

@@ -4,6 +4,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  withActionCardRetry,
 } from '../shared/action-card.mjs';
 
 /**
@@ -257,10 +258,10 @@ export class TelegramClearCard {
     if (!record?.target || !Number.isSafeInteger(messageId)) return false;
     if (typeof bot?.editInteractionCard !== 'function') return false;
     try {
-      await bot.editInteractionCard(record.target, messageId, {
+      await withActionCardRetry(() => bot.editInteractionCard(record.target, messageId, {
         text,
         markup: EMPTY_KEYBOARD,
-      });
+      }));
       return true;
     } catch (error) {
       this.#logger.warn?.(

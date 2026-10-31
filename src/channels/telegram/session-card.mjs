@@ -4,6 +4,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  withActionCardRetry,
 } from '../shared/action-card.mjs';
 import { sessionBindErrorMessage } from '../shared/workspace-command.mjs';
 
@@ -552,10 +553,10 @@ export class TelegramSessionCard {
         || typeof bot?.editInteractionCard !== 'function') {
         throw new Error('the channel cannot edit a session card');
       }
-      await bot.editInteractionCard(target, messageId, {
+      await withActionCardRetry(() => bot.editInteractionCard(target, messageId, {
         text: card.text,
         markup: card.markup,
-      });
+      }));
       await this.#answerSafely(answer);
     } catch (error) {
       // The pressed nonce is already consumed: retire the keyboard so a dead

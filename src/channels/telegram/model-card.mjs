@@ -4,6 +4,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  withActionCardRetry,
 } from '../shared/action-card.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
@@ -701,7 +702,7 @@ export class TelegramModelCard {
       if (typeof bot?.editInteractionCard !== 'function') {
         throw new TypeError('Telegram client cannot edit an interaction card');
       }
-      await bot.editInteractionCard(target, messageId, card);
+      await withActionCardRetry(() => bot.editInteractionCard(target, messageId, card));
     } catch (error) {
       this.#registry.settle(entry.nonce, ACTION_CARD_STATUS.REVOKED);
       this.#logger.warn?.(

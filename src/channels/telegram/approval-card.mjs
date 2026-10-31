@@ -4,6 +4,7 @@ import {
   ActionCardRegistry,
   actionCardStateText,
   createCallbackNamespace,
+  withActionCardRetry,
 } from '../shared/action-card.mjs';
 import { harnessApprovalText } from '../shared/harness-approval.mjs';
 
@@ -323,10 +324,10 @@ export class TelegramApprovalCard {
         );
         if (card.messageId === null) return false;
         try {
-          await bot.editInteractionCard(target, card.messageId, {
+          await withActionCardRetry(() => bot.editInteractionCard(target, card.messageId, {
             text: terminalCardText(card.text, outcome, resolvedText),
             markup: EMPTY_KEYBOARD,
-          });
+          }));
           // The edit landed (or the client already shows it): tell the queue the
           // receipt is delivered so it skips the duplicate terminal text.
           swallowResolvedText = resolvedText;

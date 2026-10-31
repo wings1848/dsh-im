@@ -8,6 +8,7 @@ import {
   actionCardStateText,
   createActionNonce,
   createCallbackNamespace,
+  withActionCardRetry,
 } from '../../../src/channels/shared/action-card.mjs';
 
 function fakeClock(start = 1_000_000) {
@@ -229,4 +230,86 @@ test('a released claim never revives a dead card', () => {
   clock.advance(50);
   assert.equal(clocked.releaseClaim('nonce-ttl'), null);
   assert.equal(clocked.claim('nonce-ttl').status, ACTION_CARD_STATUS.EXPIRED);
+});
+
+/* ---------------------------------------------------------------------------
+ * A throttled card edit comes back instead of failing the press
+ *
+ * Telegram answers a rate-limited call with `retry_after`. Before this, every
+ * card surfaced that as "could not update, send the command again" even though
+ * the platform had just said when to retry — and the user did press a button,
+ * so waiting a second or two is far better than making them type.
+ * ------------------------------------------------------------------------- */
+
+test('a 429 with a short retry_after is honoured once', async () => {
+  let attempts = 0;
+  const result = await withActionCardRetry(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      const error = new Error('Too Many Requests: retry after 0.05');
+      error.providerCode = 429;
+      error.status = 429;
+      error.retry_after = 0.05;
+      throw error;
+    }
+    return 'ok';
+  });
+  assert.equal(attempts, 2, 'the operation is retried exactly once');
+  assert.equal(result, 'ok');
+});
+
+test('a 429 that keeps failing surfaces the error', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    withActionCardRetry(async () => {
+      attempts += 1;
+      const error = new Error('Too Many Requests');
+      error.providerCode = 429;
+      error.retry_after = 0.01;
+      throw error;
+    }),
+    /Too Many Requests/u,
+  );
+  assert.equal(attempts, 2, 'only one retry is attempted');
+});
+
+test('a retry_after longer than the cap is not waited on', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    withActionCardRetry(async () => {
+      attempts += 1;
+      const error = new Error('Too Many Requests');
+      error.providerCode = 429;
+      error.retry_after = 60;
+      throw error;
+    }),
+    /Too Many Requests/u,
+  );
+  assert.equal(attempts, 1, 'a long wait is the callers problem, not a silent hold');
+});
+
+test('非 429 错误不重试', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    withActionCardRetry(async () => {
+      attempts += 1;
+      throw new Error('Forbidden: bot was blocked by the user');
+    }),
+    /Forbidden/u,
+  );
+  assert.equal(attempts, 1);
+});
+
+test('a 429 without retry_after is not retried blindly', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    withActionCardRetry(async () => {
+      attempts += 1;
+      const error = new Error('Too Many Requests');
+      error.providerCode = 429;
+      throw error;
+    }),
+    /Too Many Requests/u,
+  );
+  assert.equal(attempts, 1);
 });
