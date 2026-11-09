@@ -60,7 +60,7 @@
 命令（在 `~/Code_Project/dsh-im-build`）：
 
 ```bash
-node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5083 例：5082 通过、0 失败
+node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5084 例：5083 通过、0 失败
 npm run build && npm pack && node scripts/verify-package.mjs
 ```
 

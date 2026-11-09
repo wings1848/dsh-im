@@ -26,7 +26,7 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Tests / 测试
 
-- 全量 5083 例：5082 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（16 例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
+- 全量 5084 例：5083 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
 
 
 ## [5.10.0] - 2026-11-04
