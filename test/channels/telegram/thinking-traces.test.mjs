@@ -672,7 +672,8 @@ test('E1: the legacy toggle writes the scale; an absent field is the compact def
   assert.equal(off.bots[0].presentationLevel, 'standard');
   assert.equal(configStore.get(botId).presentationLevel, 'standard');
   assert.equal(configStore.get(botId).thinkingTraces, undefined);
-  assert.equal(runtimeRecords.at(-1).config.presentationLevel, 'standard', 'the runtime restarts with the new level');
+  // No reconnect: the live runtime is switched in place (the level is read per
+  // turn), so no new runtime record appears here.
 
   const on = await controller.setThinkingTraces(botId, true);
   assert.equal(on.bots[0].presentationLevel, 'full');

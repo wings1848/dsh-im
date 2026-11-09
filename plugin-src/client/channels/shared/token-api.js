@@ -12,6 +12,7 @@ import {
   SET_THINKING_CADENCE_ENDPOINT,
 } from '../../../../src/channels/shared/thinking-cadence.mjs';
 import { normalizeSendLimitPerMinute, SET_SEND_LIMIT_ENDPOINT } from '../../../../src/channels/shared/send-limit.mjs';
+import { normalizePresentationLevel } from '../../../../src/channels/shared/presentation-level.mjs';
 import { channelName, localizeTemplate, localizeText } from '../../i18n.js';
 
 const ACCOUNT_STATES = new Set(['connected', 'connecting', 'offline', 'error']);
@@ -87,6 +88,8 @@ export function createTokenChannelApi(channel, connectionSummary, {
       // Absent or unusable falls back to the same defaults the backend applies.
       thinkingNumbering: normalizeThinkingNumbering(value.thinkingNumbering),
       thinkingIntervalSeconds: normalizeThinkingIntervalSeconds(value.thinkingIntervalSeconds),
+      // The three-rung display level; absent or unusable keeps the compact default.
+      presentationLevel: normalizePresentationLevel(value.presentationLevel),
       // Absent or unusable falls back to the same default the backend applies.
       sendLimitPerMinute: normalizeSendLimitPerMinute(value.sendLimitPerMinute),
       ...(Object.hasOwn(value, 'accessPolicy')

@@ -129,6 +129,11 @@ export class TelegramConfigStore extends TokenBotConfigStore {
 
   async save(value) {
     const previous = value?.platformId ? this.getByPlatformId(String(value.platformId)) : null;
-    return super.save({ ...previous, ...value });
+    const merged = { ...previous, ...value };
+    // The legacy on/off and the three-rung level describe the same setting. Once
+    // a level is stored the boolean is dropped, so a hand-edited config cannot
+    // leave the two contradicting each other.
+    if (Object.hasOwn(value ?? {}, 'presentationLevel')) delete merged.thinkingTraces;
+    return super.save(merged);
   }
 }

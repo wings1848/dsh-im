@@ -174,6 +174,11 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       helpCard: options && Object.hasOwn(options, 'helpCard')
         ? options.helpCard
         : new TelegramHelpCard({ logger: options?.logger }),
+      // /display picker: three rungs, one tap. `displayCard: null` keeps the
+      // text answer for tests/tools or a channel without a keyboard.
+      displayCard: options && Object.hasOwn(options, 'displayCard')
+        ? options.displayCard
+        : new TelegramDisplayCard({ logger: options?.logger }),
       // /clear asks once before throwing the context away. `clearCard: null`
       // keeps the immediate (pre-card) behaviour for tests/tools.
       clearCard: options && Object.hasOwn(options, 'clearCard')

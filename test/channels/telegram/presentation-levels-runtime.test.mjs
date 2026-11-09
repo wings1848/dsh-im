@@ -118,7 +118,7 @@ test('runtime/standard: one message rewritten, then collapsed into a receipt', a
   const calls = await runTurn(t, { presentationLevel: 'standard' });
   assert.deepEqual(calls.map((call) => call.method), ['send', 'edit', 'edit', 'rich']);
   assert.equal(calls[0].text, '正在处理…');
-  assert.match(calls[1].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → \{"command":"ls"\}$/);
+  assert.match(calls[1].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → ls$/);
   assert.match(calls[2].text, /^✅ 完成 · \d+ 秒 · 1 步$/);
   assert.match(calls[3].text, /final answer/u);
 });

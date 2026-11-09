@@ -59,13 +59,23 @@ test('P4: level names are localized', (t) => {
 });
 
 test('P5: tool arguments become one short phrase, never a payload', () => {
-  assert.equal(summarizeToolArguments({ command: 'npm test' }), '{"command":"npm test"}');
+  // The same extraction the per-line trace uses: a recognizable field beats the
+  // raw JSON, so 「标准」 and 「全面」 describe one call the same way.
+  assert.equal(summarizeToolArguments({ command: 'npm test' }), 'npm test');
+  assert.equal(summarizeToolArguments('{"command":"npm test"}'), 'npm test');
+  assert.equal(summarizeToolArguments({ query: 'a', command: 'b' }), 'b', 'command wins over query');
+  assert.equal(summarizeToolArguments({ unknown: 'x' }), null, 'no recognizable field yields no phrase');
   assert.equal(summarizeToolArguments('ls -la'), 'ls -la');
   assert.equal(summarizeToolArguments('a\nb\t c'), 'a b c');
+  // A surrogate pair is never split by the cap: 60 emoji cap to 40 characters.
+  const emoji = summarizeToolArguments('😀'.repeat(60));
+  assert.equal([...emoji].length, 41);
+  assert.ok(emoji.endsWith('…'));
+  assert.ok([...emoji].every((character) => character === '😀' || character === '…'));
   assert.equal(summarizeToolArguments(undefined), null);
   assert.equal(summarizeToolArguments(''), null);
   const long = summarizeToolArguments('x'.repeat(200));
-  assert.equal(long.length, 40);
+  assert.equal(long.length, 41, '40 kept characters plus the ellipsis, matching the trace line');
   assert.ok(long.endsWith('…'));
 });
 
@@ -75,9 +85,9 @@ test('P6: the compact line counts steps and carries elapsed time', () => {
   assert.equal(progress.runningText(), '⏳ 处理中 · 0 秒');
   progress.tool('bash', { command: 'ls' });
   now += 12_000;
-  assert.equal(progress.runningText(), '⏳ 处理中 · 12 秒 · 1 步\n🔧 bash → {"command":"ls"}');
+  assert.equal(progress.runningText(), '⏳ 处理中 · 12 秒 · 1 步\n🔧 bash → ls');
   progress.settle({ ok: true });
-  assert.equal(progress.runningText(), '⏳ 处理中 · 12 秒 · 1 步\n✅ bash → {"command":"ls"}');
+  assert.equal(progress.runningText(), '⏳ 处理中 · 12 秒 · 1 步\n✅ bash → ls');
   progress.tool('edit');
   progress.settle({ ok: false });
   assert.equal(
@@ -86,14 +96,12 @@ test('P6: the compact line counts steps and carries elapsed time', () => {
     'a failed latest step is marked, and a tool without arguments adds no arrow',
   );
   assert.equal(progress.doneText(), '✅ 完成 · 12 秒 · 2 步');
-  assert.equal(progress.failedText(), '⚠️ 已中断 · 12 秒 · 2 步');
   assert.equal(progress.steps, 2);
 });
 
 test('P7: a turn with no tool calls omits the step count', () => {
   const progress = createTurnProgress({ now: () => 6_000, startedAt: 1_000 });
   assert.equal(progress.doneText(), '✅ 完成 · 5 秒');
-  assert.equal(progress.failedText(), '⚠️ 已中断 · 5 秒');
 });
 
 test('P8: the compact line is translated in English', (t) => {

@@ -81,16 +81,30 @@ export class TelegramController extends TokenBotController {
   }
 
   /**
-   * Persist the three-rung display level; the runtime restarts with the new
-   * value, so the next turn already renders at that level. The legacy boolean is
-   * cleared so one setting cannot contradict the other.
+   * Persist the three-rung display level and switch the live runtime to it.
+   *
+   * No reconnect: the running bridge reads the level from memory, and a
+   * reconnect would abort every in-flight turn in every chat (including the one
+   * that just asked for the change, whose confirmation would then be sent
+   * through a dead signal). The legacy boolean is cleared so one setting cannot
+   * contradict the other.
    */
   async setPresentationLevel(botId, value) {
     const presentationLevel = normalizePresentationLevel(value);
-    return this.updateBotConfig(botId, (config) => {
+    const status = await this.updateBotConfig(botId, (config) => {
       const { thinkingTraces: _legacy, ...rest } = config;
       return { ...rest, presentationLevel };
-    });
+    }, { restart: false });
+    const runtime = this.#runtimeFor?.(botId);
+    if (typeof runtime?.setPresentationLevel === 'function') {
+      runtime.setPresentationLevel(presentationLevel);
+    }
+    return status;
+  }
+
+  /** The live runtime of one bot, when the base controller exposes it. */
+  #runtimeFor(botId) {
+    return typeof this.runtimeFor === 'function' ? this.runtimeFor(botId) : undefined;
   }
 
   /**

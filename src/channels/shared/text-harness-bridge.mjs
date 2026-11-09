@@ -9,7 +9,6 @@ import {
   createTurnProgress,
   normalizePresentationLevel,
   parsePresentationLevelInput,
-  presentationLevelFromConfig,
   presentationLevelLabel,
 } from './presentation-level.mjs';
 import {
@@ -3061,6 +3060,14 @@ export class TextHarnessBridge {
   /** The level this bridge currently renders turns at. */
   get presentationLevel() {
     return this.#presentationLevel;
+  }
+
+  /**
+   * Adopt a level another owner already persisted (the settings page). Rendering
+   * reads it per turn, so the next turn follows immediately.
+   */
+  setPresentationLevel(value) {
+    this.#presentationLevel = normalizePresentationLevel(value, this.#presentationLevel);
   }
 
   /**

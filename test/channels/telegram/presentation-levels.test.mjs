@@ -8,7 +8,8 @@ import { TelegramConfigStore } from '../../../src/channels/telegram/config-store
 import { TelegramController } from '../../../src/channels/telegram/telegram-controller.mjs';
 import { TelegramDisplayCard } from '../../../src/channels/telegram/display-card.mjs';
 import { TelegramHarnessBridge } from '../../../src/channels/telegram/telegram-bridge.mjs';
-import { TelegramBotClient } from '../../../src/channels/telegram/telegram-runtime.mjs';
+import { TelegramBotClient, TelegramRuntime } from '../../../src/channels/telegram/telegram-runtime.mjs';
+import { TelegramStateStore } from '../../../src/channels/telegram/state-store.mjs';
 
 const quietLogger = { warn: () => {}, error: () => {}, debug: () => {} };
 
@@ -147,7 +148,7 @@ test('L2: standard paints one compact line and leaves a one-line receipt', async
   });
   await bridge.accept(message());
   assert.equal(calls.updates.length, 1, 'one update per window, not one per event');
-  assert.match(calls.updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → \{"command":"ls"\}$/);
+  assert.match(calls.updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → ls$/);
   assert.match(calls.finish[0].progressSummary, /^✅ 完成 · \d+ 秒 · 1 步$/);
   assert.equal(calls.finish[0].format, 'markdown', 'the answer format is unchanged');
 });
@@ -323,6 +324,7 @@ test('L11: the level is stored, reported and cleared back to the legacy field', 
   const configPath = join(directory, 'config.json');
   const configStore = await new TelegramConfigStore(configPath).load();
   const runtimeRecords = [];
+  const liveLevels = [];
   const controller = new TelegramController({
     credentials: {
       async resolve() { return { value: '123456789:token' }; },
@@ -337,6 +339,7 @@ test('L11: the level is stored, reported and cleared back to the legacy field', 
         status: { ready: true, connectionState: 'connected', harnessReachable: true, lastCheckedAt: 10 },
         async start() {},
         async stop() {},
+        setPresentationLevel(level) { liveLevels.push(level); },
       };
     },
   });
@@ -344,10 +347,14 @@ test('L11: the level is stored, reported and cleared back to the legacy field', 
   const botId = bound.bots[0].botId;
   assert.equal(bound.bots[0].presentationLevel, 'standard', 'a fresh bot starts compact');
 
+  const restartsBefore = runtimeRecords.length;
   const full = await controller.setPresentationLevel(botId, 'full');
   assert.equal(full.bots[0].presentationLevel, 'full');
   assert.equal(configStore.get(botId).presentationLevel, 'full');
-  assert.equal(runtimeRecords.at(-1).config.presentationLevel, 'full', 'the runtime restarts with the new level');
+  // A display change never reconnects: a reconnect would abort every in-flight
+  // turn in every chat, including the one that asked for the change.
+  assert.equal(runtimeRecords.length, restartsBefore, 'the bot must not reconnect for a display change');
+  assert.deepEqual(liveLevels, ['full'], 'the live runtime is switched in place');
 
   // An unknown value clamps to the default instead of poisoning the bot.
   const clamped = await controller.setPresentationLevel(botId, 'shout');
@@ -418,4 +425,108 @@ test('L14: a rejected receipt edit falls back to deleting the placeholder', asyn
   await stream.finish({ kind: 'text', text: 'answer', format: 'plain', progressSummary: '✅ 完成 · 1 秒' });
   assert.equal(calls.deleted.length, 1, 'a stale placeholder must not outlive the turn');
   assert.equal(calls.sent.at(-1).text, 'answer');
+});
+
+// --- the picker as the runtime actually ships it ---------------------------
+
+test('L15: a real runtime answers /display with the picker card, not just text', async (t) => {
+  // Regression for the card being constructed in tests but never wired into the
+  // production bridge: `/display` used to fall through to the plain text menu.
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-im-display-runtime-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = await new TelegramStateStore(join(directory, 'state.json')).load();
+  const sent = [];
+  const cards = [];
+  const fakeApi = {
+    getMe: async () => ({ id: 123456789, is_bot: true, username: 'HarnessBot' }),
+    getWebhookInfo: async () => ({ url: '' }),
+    deleteMyCommands: async () => true,
+    setMyCommands: async () => true,
+    setChatMenuButton: async () => true,
+    setMessageReaction: async () => true,
+    getUpdates: async ({ offset, timeout, signal } = {}) => {
+      if (timeout === 0) return [];
+      if (offset <= 200) {
+        return [{
+          update_id: 200,
+          message: {
+            message_id: 200,
+            date: 1_700_000_000,
+            chat: { id: 42, type: 'private' },
+            from: { id: 42, is_bot: false, first_name: 'Wings' },
+            text: '/display',
+          },
+        }];
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    },
+    sendMessage: async (request) => {
+      sent.push(request.text);
+      if (request.replyMarkup) {
+        cards.push({ text: request.text, markup: request.replyMarkup });
+        return { message_id: 777 };
+      }
+      return { message_id: 700 + sent.length };
+    },
+    editMessageText: async () => true,
+  };
+  const runtime = new TelegramRuntime({
+    config: { botId: 'telegram_display', platformId: '123456789', username: 'HarnessBot' },
+    token: '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456',
+    state,
+    createApi: () => fakeApi,
+    logger: { error() {}, warn() {}, info() {}, debug() {} },
+    harness: { ensureRunning: async () => true },
+  });
+  await runtime.start();
+  try {
+    const deadline = Date.now() + 3_000;
+    while (cards.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(cards.length, 1, 'the runtime must send the picker card');
+    const buttons = cards[0].markup.inline_keyboard.flat();
+    assert.equal(buttons.length, 3);
+    assert.ok(buttons.every((button) => /^d1\|/u.test(button.callback_data)));
+    assert.ok(sent.every((text) => !/发送 \/display 极简/u.test(text)), 'the text fallback must not also fire');
+  } finally {
+    await runtime.stop();
+  }
+});
+
+test('L16: every press keeps the picker alive (current rung, then another rung)', async () => {
+  const bot = {
+    async sendText() { assert.fail('card path only'); },
+    async answerInteractionCallback() {},
+    async sendInteractionCard() { return { providerMessageIds: ['801'] }; },
+    async editInteractionCard() { return {}; },
+  };
+  const card = new TelegramDisplayCard({ logger: quietLogger });
+  const presses = [];
+  const handle = (callback, current) => card.handlePress(callback, {
+    bot,
+    answer: (text) => presses.push(text),
+    conversationKey: 'direct:u1',
+    current,
+    apply: async (level) => level,
+  });
+  assert.equal(await card.present({
+    bot, target: { chatId: 42 }, conversationKey: 'direct:u1', current: 'standard',
+  }), true);
+  const nonce = card.registry.activeFor('direct:u1')?.nonce;
+  assert.ok(nonce, 'the card issued a nonce');
+
+  // A tap on the rung already in use must not kill the card.
+  await handle({ data: `d1|${nonce}|standard` }, 'standard');
+  const live = card.registry.activeFor('direct:u1');
+  assert.ok(live, 'the picker stayed live after tapping the current rung');
+
+  // A real switch also hands the picker a new identity, so a second tap works.
+  await handle({ data: `d1|${live.nonce}|full` }, 'standard');
+  const afterSwitch = card.registry.activeFor('direct:u1');
+  assert.ok(afterSwitch, 'the picker stayed live after a successful switch');
+  assert.notEqual(afterSwitch.nonce, live.nonce, 'the used nonce is retired');
+  assert.match(presses.at(-1), /显示挡位已设为「全面」/u);
 });

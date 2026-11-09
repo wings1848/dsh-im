@@ -5,9 +5,9 @@ import { createEditableMessageStream } from '../shared/editable-message-stream.m
 import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { t } from '../shared/i18n.mjs';
 import {
-  DEFAULT_PRESENTATION_LEVEL,
   normalizePresentationLevel,
   presentationLevelFromConfig,
+  summarizeToolArguments,
 } from '../shared/presentation-level.mjs';
 import { groupTriggerAddressed, normalizeGroupTriggers } from './group-triggers.mjs';
 import { captureContextEnhancement } from '../shared/context-enhancement.mjs';
@@ -705,9 +705,7 @@ class TelegramDeliveryStream {
     return this.#enqueue(async () => {
       if (this.#closed) return undefined;
       this.#closed = true;
-      const receipt = typeof text?.progressSummary === 'string' ? text.progressSummary : null;
-      const block = createTextDeliveryBlock(text, 'plain');
-      const result = await this.#fail(receipt ? { ...block, progressSummary: receipt } : block);
+      const result = await this.#fail(createTextDeliveryBlock(text, 'plain'));
       this.#providerMessageIds.push(...(result?.providerMessageIds ?? []));
       return result;
     });
@@ -724,9 +722,6 @@ class TelegramDeliveryStream {
 // Thinking-trace display rules. Truncation fallback (spoiler / inline-button
 // expansion are follow-ups gated on three-platform client verification):
 // tool traces cap the argument summary, reasoning caps the first paragraph.
-const TOOL_TRACE_ARG_KEYS = Object.freeze([
-  'command', 'pattern', 'query', 'url', 'file_path', 'path', 'text', 'prompt', 'message', 'description',
-]);
 const TOOL_TRACE_SUMMARY_LIMIT = 120;
 const THINKING_LINE_LIMIT = 200;
 
@@ -736,32 +731,9 @@ function truncateCapped(value, limit) {
 
 /** Extract a one-line argument summary from a tool call's `arguments`. */
 export function toolTraceSummary(argumentsValue) {
-  let record = null;
-  if (argumentsValue && typeof argumentsValue === 'object' && !Array.isArray(argumentsValue)) {
-    record = argumentsValue;
-  } else if (typeof argumentsValue === 'string') {
-    const trimmed = argumentsValue.trim();
-    if (!trimmed) return null;
-    let parsed = null;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
-    }
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      record = parsed;
-    } else {
-      return truncateCapped(trimmed.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
-    }
-  }
-  if (!record) return null;
-  for (const key of TOOL_TRACE_ARG_KEYS) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) {
-      return truncateCapped(value.replace(/\s+/g, ' ').trim(), TOOL_TRACE_SUMMARY_LIMIT);
-    }
-  }
-  return null;
+  // One extraction shared with the compact progress line, so 「标准」 and 「全面」
+  // never describe the same call differently.
+  return summarizeToolArguments(argumentsValue, { limit: TOOL_TRACE_SUMMARY_LIMIT });
 }
 
 /** Format one tool-trace line: `🔧 <name> → <summary>` (summary optional). */
@@ -791,7 +763,6 @@ export class TelegramBotClient {
   #logger;
   #thinkingNumbering;
   #thinkingIntervalMs;
-  #presentationLevel;
 
   constructor({
     api,
@@ -799,7 +770,6 @@ export class TelegramBotClient {
     logger = console,
     thinkingNumbering = false,
     thinkingIntervalSeconds = 0,
-    presentationLevel = null,
   }) {
     this.#api = api;
     this.#signal = signal;
@@ -807,11 +777,6 @@ export class TelegramBotClient {
     // Read once: the runtime restarts whenever the owner changes either value.
     this.#thinkingNumbering = normalizeThinkingNumbering(thinkingNumbering);
     this.#thinkingIntervalMs = normalizeThinkingIntervalSeconds(thinkingIntervalSeconds) * 1_000;
-    // How much of a turn this chat shows; the bridge and the placeholder agree
-    // on it so a turn cannot open the wrong stream.
-    this.#presentationLevel = normalizePresentationLevel(
-      presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
-    );
   }
 
   async sendText(target, text) {
@@ -1251,7 +1216,9 @@ export class TelegramBotClient {
       },
       fail: async (block) => {
         await drainHeld();
-        await settlePlaceholder(block?.progressSummary);
+        // A failed turn leaves no receipt: the error message is its terminal
+        // state, so the placeholder is dropped rather than rewritten.
+        await this.#deletePlaceholder(target, messageId);
         return this.#sendPlain(target, block.text);
       },
       // A cancelled turn must not wake up later and rewrite the placeholder the
@@ -1265,8 +1232,8 @@ export class TelegramBotClient {
       // Answer text is not mirrored into the placeholder: it is deleted before
       // the real message goes out, so a preview would duplicate the reply.
       previewAnswer: false,
-      // Declares that finish()/fail() understand `progressSummary`, which is what
-      // lets a compact turn keep its receipt without changing other channels.
+      // Declares that finish() understands `progressSummary`, which is what lets
+      // a compact turn keep its receipt without changing other channels.
       supportsProgressSummary: true,
       uniqueFrames: numbering,
       logger: this.#logger,
@@ -1713,7 +1680,6 @@ export class TelegramRuntime {
           extractConnectionEvidence(error).details,
         );
       }
-      const presentationLevel = presentationLevelFromConfig(this.#config);
       const client = new TelegramBotClient({
         api,
         signal: controller.signal,
@@ -1721,7 +1687,6 @@ export class TelegramRuntime {
         // Trace frames are numbered and paced per bot; 0 seconds means no pacing.
         thinkingNumbering: this.#config?.thinkingNumbering,
         thinkingIntervalSeconds: this.#config?.thinkingIntervalSeconds,
-        presentationLevel,
       });
       this.#bridge = new TelegramHarnessBridge({
         bot: client,

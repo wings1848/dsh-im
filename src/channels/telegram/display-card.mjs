@@ -183,9 +183,10 @@ export class TelegramDisplayCard {
     }
 
     const before = normalizePresentationLevel(current);
+    // Pressing the rung already in use is not an error: acknowledge it and keep
+    // the picker alive, because the user may simply have tapped the marked one.
     if (press.level === before) {
-      this.#registry.settle(owned.nonce, ACTION_CARD_STATUS.ACTIVE);
-      await this.#repaint(bot, owned.nonce, before);
+      await this.#repaintFresh(bot, owned, before);
       await notice(t('已经是「{level}」了。', { level: presentationLevelLabel(before) }));
       return true;
     }
@@ -198,30 +199,45 @@ export class TelegramDisplayCard {
         '[dsh-im:telegram] a /display press failed to save the level:',
         error?.message ?? error,
       );
-      this.#registry.settle(owned.nonce, ACTION_CARD_STATUS.REVOKED);
-      await this.#repaint(bot, owned.nonce, before);
+      // The card stays usable so the user can retry a different rung.
+      await this.#repaintFresh(bot, owned, before);
       await notice(t('显示挡位保存失败，请稍后重试。'));
       return true;
     }
-    this.#registry.settle(owned.nonce, ACTION_CARD_STATUS.RESOLVED);
     const level = normalizePresentationLevel(stored, press.level);
-    // Repaint before the runtime restart the save triggers can tear this bridge
-    // down; a failure to repaint still leaves the setting saved and announced.
-    const repainted = await this.#repaint(bot, owned.nonce, level);
-    if (!repainted) await this.#retireKeyboard(bot, owned.nonce);
+    // Every press finishes the nonce it claimed, so the repaint must carry a new
+    // one: repainting under the dead nonce would answer "already handled" to the
+    // next tap.
+    await this.#repaintFresh(bot, owned, level);
     await notice(t('显示挡位已设为「{level}」。', { level: presentationLevelLabel(level) }));
     return true;
   }
 
-  async #repaint(bot, nonce, level) {
-    const record = this.#records.get(nonce);
+  /**
+   * Retire this presentation and paint the same message with a fresh nonce.
+   *
+   * One nonce = one press, which is what lets the registry reject double taps;
+   * a live picker therefore has to hand itself a new identity after every
+   * accepted press.
+   */
+  async #repaintFresh(bot, entry, level) {
+    this.#registry.settle(entry.nonce, ACTION_CARD_STATUS.RESOLVED);
+    const record = this.#records.get(entry.nonce);
     const messageId = Number(record?.messageId);
     if (!record?.target || !Number.isSafeInteger(messageId)) return false;
+    const next = this.#registry.issue({ conversationKey: entry.conversationKey, kind: 'display' });
+    this.#records.delete(entry.nonce);
+    this.#records.set(next.nonce, {
+      messageId: record.messageId,
+      target: record.target,
+      conversationKey: entry.conversationKey,
+    });
+    this.#pruneRecords();
     if (typeof bot?.editInteractionCard !== 'function') return false;
     try {
       await withActionCardRetry(() => bot.editInteractionCard(record.target, messageId, {
         text: displayCardText(level),
-        markup: renderDisplayCard(nonce, level).markup,
+        markup: renderDisplayCard(next.nonce, level).markup,
       }));
       return true;
     } catch (error) {
@@ -229,6 +245,8 @@ export class TelegramDisplayCard {
         '[dsh-im:telegram] could not repaint the /display picker:',
         error?.message ?? error,
       );
+      this.#records.delete(next.nonce);
+      await this.#retireKeyboard(bot, next.nonce);
       return false;
     }
   }

@@ -79,29 +79,55 @@ export function presentationLevelLabel(level) {
 }
 
 const TOOL_SUMMARY_LIMIT = 40;
+/** Same fields the per-line trace prefers, most specific first. */
+const TOOL_ARGUMENT_KEYS = Object.freeze([
+  'command', 'pattern', 'query', 'url', 'file_path', 'path', 'text', 'prompt', 'message', 'description',
+]);
 const TOOL_ICON = Object.freeze({ running: '🔧', ok: '✅', error: '⚠️' });
 
 /**
- * A tool argument is shown as one short phrase, never as the tool's payload:
- * the reader needs to recognize the step, not to audit it. Mirrors the `→`
- * summary the thinking stream already uses.
+ * Cut a string on a character boundary.
+ *
+ * A code point is one grapheme for this purpose: slicing UTF-16 units can split
+ * a surrogate pair and render a replacement character — a visible glitch in a
+ * line the reader watches update live.
  */
-export function summarizeToolArguments(value) {
-  if (value === undefined || value === null) return null;
-  let text = '';
-  try {
-    text = typeof value === 'string' ? value : JSON.stringify(value) ?? '';
-  } catch {
-    return null;
+function truncateText(text, limit) {
+  const characters = Array.from(text);
+  if (characters.length <= limit) return text;
+  // Keep `limit` characters and add the ellipsis: this is the shape the tool
+  // trace lines already shipped with, so the two rungs stay identical.
+  return `${characters.slice(0, limit).join('')}…`;
+}
+
+/**
+ * A tool argument is shown as one short phrase, never as the tool's payload:
+ * the reader needs to recognize the step, not to audit it. Accepts the raw
+ * argument value or the JSON string the Harness hands over.
+ */
+export function summarizeToolArguments(value, { limit = TOOL_SUMMARY_LIMIT } = {}) {
+  let record = null;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    record = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) record = parsed;
+      else return truncateText(trimmed.replace(/\s+/gu, ' ').trim(), limit);
+    } catch {
+      return truncateText(trimmed.replace(/\s+/gu, ' ').trim(), limit);
+    }
   }
-  const flattened = text
-    .replace(/\\n/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim();
-  if (!flattened) return null;
-  return flattened.length > TOOL_SUMMARY_LIMIT
-    ? `${flattened.slice(0, TOOL_SUMMARY_LIMIT - 1)}…`
-    : flattened;
+  if (!record) return null;
+  for (const key of TOOL_ARGUMENT_KEYS) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return truncateText(candidate.replace(/\s+/gu, ' ').trim(), limit);
+    }
+  }
+  return null;
 }
 
 /**
@@ -127,6 +153,8 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
         : t('✅ 完成 · {seconds} 秒', { seconds: elapsed });
     }
     if (phase === 'failed') {
+      // No channel leaves a failure receipt today; the wording stays here so a
+      // future one cannot invent a fourth phrasing.
       return steps > 0
         ? t('⚠️ 已中断 · {seconds} 秒 · {steps} 步', { seconds: elapsed, steps })
         : t('⚠️ 已中断 · {seconds} 秒', { seconds: elapsed });
@@ -165,10 +193,6 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
     /** The one-line receipt a finished turn leaves behind. */
     doneText() {
       return compose('done');
-    },
-    /** The one-line receipt a failed turn leaves behind. */
-    failedText() {
-      return compose('failed');
     },
   });
 }

@@ -34,8 +34,9 @@
 | F3 | 回执靠 `stream.supportsProgressSummary` + `progressSummary` 字段，只有声明支持的流才会收到 | `telegram-runtime.mjs` `TelegramDeliveryStream`、`openDeliveryStream` |
 | F4 | 占位改回执失败（例如 not-modified / 429）时退化为删除，绝不留过期占位 | `telegram-runtime.mjs` `settlePlaceholder` |
 | F5 | `/display` 只在声明支持的渠道出现（catalog `channels: ['telegram']`） | `command-catalog.mjs`、`text-harness-bridge.mjs` `#supportsDisplayCommand` |
-| F6 | 卡片命名空间 `d1|<nonce>|<level>`，TTL 30 分钟，首按认领，当前项 ✓ 且点击等价 no-op | `display-card.mjs` |
-| F7 | 配置落盘 `presentationLevel`，未知值回落标准；保存时不重启旧字段 | `telegram/config-store.mjs`、`telegram-controller.mjs` |
+| F6 | 卡片命名空间 `d1|<nonce>|<level>`，TTL 30 分钟，首按认领；**每次按完换新 nonce 再重绘**，所以卡片可反复用，点当前项也不死 | `display-card.mjs` |
+| F7 | 配置落盘 `presentationLevel`，未知值回落标准；写入挡位时删掉旧布尔 | `telegram/config-store.mjs`、`telegram-controller.mjs` |
+| F9 | 切换挡位**不重连**：配置落盘后把新挡位推给在跑的 runtime/bridge，下一回合即生效，不会 abort 其它聊天的在飞回合 | `telegram-controller.mjs`、`token-bot-controller.mjs`（`restart:false`）、`telegram-runtime.mjs#setPresentationLevel` |
 | F8 | RPC `bot.presentation-level.set` + 设置页下拉 | `plugin-src/host/channels/shared/presentation-level-rpc.mjs`、`rpc.mjs`、`thinking-traces.js` |
 
 ## 3. 兼容与行为变更（明说）
@@ -59,11 +60,27 @@
 命令（在 `~/Code_Project/dsh-im-build`）：
 
 ```bash
-node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5081 例：5080 通过、0 失败
+node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5083 例：5082 通过、0 失败
 npm run build && npm pack && node scripts/verify-package.mjs
 ```
 
 产物：`xmanrui-dsh-im-5.10.1-wings.2.tgz`（517 文件，`Verified dsh-im package artifacts.`，sha256 `56ce0dd9…`），已复制到 `~/.dsh/local-packages/` 待装。
+
+## 4.1 独立评审修掉的问题（2026-11-10）
+
+第一版有 12 条独立评审意见，阻塞级的两条已修并补了回归测试：
+
+| # | 问题 | 修法 | 回归断言 |
+| --- | --- | --- | --- |
+| P1 | `TelegramDisplayCard` 没接进生产 bridge，`/display` 只会走文本菜单（卡片是死代码） | `telegram-bridge.mjs` 构造器注入 | `presentation-levels.test.mjs` L15（真 runtime 必须发出带 `d1\|` 按钮的卡片） |
+| P2 | `/display <挡位>` 保存会重启 runtime，确认消息随 abort 丢失，且打断其它聊天 | 保存走 `restart:false` + live runtime/bridge 推送 | L11（不重连、就地切换）、L7（确认消息） |
+| P3 | 点「当前挡位」按钮 `settle(ACTIVE)` 抛 TypeError，卡片永久卡死 | 当前项不 settle，直接换 nonce 重绘 | L16 |
+| P4 | 成功后用同一个 nonce 重绘，第二次点击变「已处理」 | 每次按完 `issue()` 新 nonce | L16 |
+| P5 | 设置页下拉恒显示「标准」：客户端归一化漏了字段 | `token-api.js` 白名单加 `presentationLevel` | client-ui / bundle 用例 |
+| P6 | 旧 `thinkingTraces` 字段实际没被清掉（config-store 的 `...previous` 合并又写回） | `TelegramConfigStore.save` 在写入挡位时删布尔 | E1、L11 |
+| P8 | 标准与全面两套工具摘要（`{"command":"ls"}` vs `ls`） | 抽出共享 `summarizeToolArguments`，两处共用 | P5/P6、A1–A3 |
+| P9 | 非 ASCII 截断可能切出孤立代理 | 按码点截断 | P5（emoji 用例） |
+| P7 | 飞书面板用例被改成空循环（白跑） | 用 `commandsForChannel('slack')` 代表文本族并断言非空 | 飞书 slash 用例 |
 
 ## 5. 未完成（下一轮）
 
