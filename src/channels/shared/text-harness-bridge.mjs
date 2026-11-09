@@ -2248,7 +2248,7 @@ export class TextHarnessBridge {
         answer: (text) => this.#answerInteractionCallback(callback, text),
         conversationKey: key,
         refresh: () => this.#readStatusSnapshot(key),
-        run: (command) => this.#runMenuEntry(command, key),
+        run: (command) => this.#runStatusCardEntry(command, key, callback),
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a /status press:`,
@@ -3324,6 +3324,26 @@ export class TextHarnessBridge {
     return result;
   }
 
+
+  /**
+   * Replay one `/status` card entry.
+   *
+   * Almost every entry re-runs the typed command. `/display` is different: it is
+   * itself a card, so it opens the picker directly and reports success without a
+   * message — which is exactly what the status card expects from `run`.
+   */
+  async #runStatusCardEntry(command, key, callback) {
+    if (/^\/display$/iu.test(command)) {
+      if (!this.#supportsDisplayCommand()) return null;
+      await this.#runDisplayCommand({
+        target: callback?.replyTarget ?? {},
+        command: '/display',
+        conversationKey: key,
+      });
+      return { handled: true };
+    }
+    return this.#runMenuEntry(command, key);
+  }
 
   /** Read the current /status snapshot without sending anything. */
   /**

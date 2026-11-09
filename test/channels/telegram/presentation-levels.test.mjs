@@ -671,5 +671,19 @@ test('L18: the /status card carries the current rung and a picker entry', async 
   });
   assert.equal(cards.length, 1, 'the status card was sent');
   assert.match(cards[0].text, /显示挡位：全面/u);
-  assert.ok(cards[0].markup.inline_keyboard.flat().some((b) => /显示挡位/u.test(b.text)));
+  const displayButton = cards[0].markup.inline_keyboard.flat()
+    .find((button) => /显示挡位/u.test(button.text));
+  assert.ok(displayButton, 'the picker entry must be on the card');
+
+  // Pressing it must open the picker, not answer "could not open".
+  const notices = [];
+  bot.answerInteractionCallback = async (_id, text) => { notices.push(text); };
+  bot.editInteractionCard = async () => ({});
+  await bridge.acceptCallback({
+    conversationId: '42', senderId: '42', messageId: '321', kind: 'direct',
+    data: displayButton.callback_data, replyTarget: { chatId: 42 },
+  });
+  assert.equal(cards.length, 2, 'the display picker was sent');
+  assert.match(cards[1].text, /🎛 显示挡位/u);
+  assert.ok(!notices.some((text) => /无法打开/u.test(text ?? '')), notices.join('|'));
 });
