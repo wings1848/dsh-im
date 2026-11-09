@@ -360,3 +360,24 @@ test('a double refresh reads the snapshot once per claimed press', async () => {
   ]);
   assert.equal(reads, 1, 'a concurrent second press does not refresh again');
 });
+
+test('the status card shows the current display level and opens its picker', (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const text = statusCardText({
+    label: 'Telegram',
+    workspace: '/home/wings/project',
+    sessionId: 'session-abc',
+    model: 'deepseek-v4.1-flash',
+    presentationLevel: 'minimal',
+  });
+  assert.match(text, /显示挡位：极简/u);
+  const card = renderStatusCard({
+    label: 'Telegram', workspace: '/home/wings/project', sessionId: 'session-abc',
+    presentationLevel: 'minimal',
+  }, 'nonce-status');
+  const buttons = card.markup.inline_keyboard.flat();
+  const display = buttons.find((button) => /显示挡位/u.test(button.text));
+  assert.ok(display, 'the picker entry must be on the card');
+  assert.match(display.callback_data, /^t1\|/u);
+});

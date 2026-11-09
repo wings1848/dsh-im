@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
+import { setImHostLanguage } from '../../../src/channels/shared/i18n.mjs';
 import { TelegramConfigStore } from '../../../src/channels/telegram/config-store.mjs';
 import { TelegramController } from '../../../src/channels/telegram/telegram-controller.mjs';
 import { TelegramDisplayCard } from '../../../src/channels/telegram/display-card.mjs';
@@ -637,4 +638,38 @@ test('L17: a real runtime press saves the level, repaints the picker and confirm
   } finally {
     await runtime.stop();
   }
+});
+
+test('L18: the /status card carries the current rung and a picker entry', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cards = [];
+  const bot = {
+    async sendText() {},
+    async sendTyping() {},
+    async sendInteractionCard(_target, card) {
+      cards.push(card);
+      return { providerMessageIds: ['321'] };
+    },
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    harness: {
+      ensureRunning: async () => true,
+      currentWorkspace: () => '/home/wings/e2e',
+      currentConversationWorkspace: () => '/home/wings/e2e',
+      status: async () => ({ connected: true }),
+      hostDescribe: async () => ({ version: '0.2.2' }),
+    },
+    presentationLevel: 'full',
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: '1', senderId: '42', kind: 'direct', conversationId: '42',
+    content: '/status', addressed: true, replyTarget: { chatId: 42 },
+  });
+  assert.equal(cards.length, 1, 'the status card was sent');
+  assert.match(cards[0].text, /显示挡位：全面/u);
+  assert.ok(cards[0].markup.inline_keyboard.flat().some((b) => /显示挡位/u.test(b.text)));
 });

@@ -1287,7 +1287,9 @@ export class TextHarnessBridge {
         // A keyboard channel gets the actionable card; the text below stays the
         // answer everywhere else (and when the card cannot be delivered).
         if (status.statusSnapshot
-          && await this.#presentStatusCard(target, conversationKey, status.statusSnapshot)) return;
+          && await this.#presentStatusCard(
+            target, conversationKey, this.#withDisplayLevel(status.statusSnapshot),
+          )) return;
         await this.#bot.sendText(target, status.message);
         return;
       }
@@ -3324,6 +3326,21 @@ export class TextHarnessBridge {
 
 
   /** Read the current /status snapshot without sending anything. */
+  /**
+   * Add this bridge's display level to a status snapshot.
+   *
+   * The status text is shared by every channel and pinned byte-for-byte, so the
+   * level rides only on the card snapshot (Telegram renders it; other channels
+   * never see this function).
+   */
+  #withDisplayLevel(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return snapshot;
+    return Object.freeze({
+      ...snapshot,
+      presentationLevel: this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
+    });
+  }
+
   async #readStatusSnapshot(conversationKey) {
     try {
       const status = await runStatusCommand({
@@ -3333,7 +3350,7 @@ export class TextHarnessBridge {
         conversationKey,
         signal: this.#signal,
       });
-      return status?.statusSnapshot ?? null;
+      return this.#withDisplayLevel(status?.statusSnapshot ?? null);
     } catch (error) {
       this.#logger.warn?.(
         `[dsh-im:${this.#descriptor.key}] could not read a /status refresh:`,

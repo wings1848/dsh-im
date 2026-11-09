@@ -1,4 +1,5 @@
 import { t } from '../shared/i18n.mjs';
+import { presentationLevelLabel } from '../shared/presentation-level.mjs';
 import {
   ACTION_CARD_STATUS,
   ActionCardRegistry,
@@ -39,6 +40,7 @@ const EMPTY_KEYBOARD = Object.freeze({ inline_keyboard: [] });
 /** One action per entry; `refresh` re-reads the snapshot, the rest open pickers. */
 export const TELEGRAM_STATUS_ACTIONS = Object.freeze({
   refresh: 'r',
+  display: 'd',
   sessions: 's',
   workspace: 'w',
   models: 'm',
@@ -48,6 +50,8 @@ export const TELEGRAM_STATUS_ACTIONS = Object.freeze({
 });
 
 const COMMAND_BY_ACTION = Object.freeze({
+  // The display picker is a command, so the card only replays it.
+  [TELEGRAM_STATUS_ACTIONS.display]: '/display',
   [TELEGRAM_STATUS_ACTIONS.sessions]: '/sessionlist',
   [TELEGRAM_STATUS_ACTIONS.workspace]: '/ws',
   [TELEGRAM_STATUS_ACTIONS.models]: '/models',
@@ -58,6 +62,7 @@ const COMMAND_BY_ACTION = Object.freeze({
 
 const LABEL_BY_ACTION = Object.freeze({
   [TELEGRAM_STATUS_ACTIONS.refresh]: '🔄 刷新',
+  [TELEGRAM_STATUS_ACTIONS.display]: '🎛 显示挡位',
   [TELEGRAM_STATUS_ACTIONS.sessions]: '💬 会话',
   [TELEGRAM_STATUS_ACTIONS.workspace]: '📁 工作区',
   [TELEGRAM_STATUS_ACTIONS.models]: '🤖 模型',
@@ -131,6 +136,9 @@ export function statusCardText(snapshot = {}) {
   if (typeof preset === 'string' && preset) {
     lines.push(t('Agent Preset（预设）：{preset}', { preset }));
   }
+  if (typeof snapshot?.presentationLevel === 'string' && snapshot.presentationLevel) {
+    lines.push(t('显示挡位：{level}', { level: presentationLevelLabel(snapshot.presentationLevel) }));
+  }
   if (running === true) lines.push(t('运行中任务：有（发送 /stop 可停止）'));
   return lines.join('\n');
 }
@@ -157,6 +165,9 @@ export function renderStatusCard(snapshot, nonce, { sessionId = null } = {}) {
     TELEGRAM_STATUS_ACTIONS.sessions,
     TELEGRAM_STATUS_ACTIONS.workspace,
     TELEGRAM_STATUS_ACTIONS.models,
+    // "How much does it show?" belongs next to "which model?" — both are one tap
+    // from the state they describe.
+    TELEGRAM_STATUS_ACTIONS.display,
   ];
   // Presets only make sense when the Host reports a preset at all.
   if (snapshot?.preset) entries.push(TELEGRAM_STATUS_ACTIONS.presets);

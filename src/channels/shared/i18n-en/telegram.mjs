@@ -228,4 +228,7 @@ export default {
 
   '⚠️ 失败': '⚠️ failed',
 
+  '显示挡位：{level}': 'Display: {level}',
+  '🎛 显示挡位': '🎛 Display',
+
 };
