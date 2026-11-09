@@ -530,3 +530,106 @@ test('L16: every press keeps the picker alive (current rung, then another rung)'
   assert.notEqual(afterSwitch.nonce, live.nonce, 'the used nonce is retired');
   assert.match(presses.at(-1), /显示挡位已设为「全面」/u);
 });
+
+test('L17: a real runtime press saves the level, repaints the picker and confirms', async (t) => {
+  // End-to-end over the two updates a reader actually produces: the command, then
+  // the button press. This is the regression for "save reconnects and the
+  // confirmation is lost" and for "the picker dies after one press".
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-im-display-press-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = await new TelegramStateStore(join(directory, 'state.json')).load();
+  const queue = [{
+    update_id: 300,
+    message: {
+      message_id: 300,
+      date: 1_700_000_000,
+      chat: { id: 42, type: 'private' },
+      from: { id: 42, is_bot: false, first_name: 'Wings' },
+      text: '/display',
+    },
+  }];
+  const cards = [];
+  const edits = [];
+  const acks = [];
+  const sent = [];
+  const saved = [];
+  let nextUpdate = 300;
+  const fakeApi = {
+    getMe: async () => ({ id: 123456789, is_bot: true, username: 'HarnessBot' }),
+    getWebhookInfo: async () => ({ url: '' }),
+    deleteMyCommands: async () => true,
+    setMyCommands: async () => true,
+    setChatMenuButton: async () => true,
+    setMessageReaction: async () => true,
+    answerCallbackQuery: async (payload) => { acks.push(payload); return true; },
+    getUpdates: async ({ offset, timeout, signal } = {}) => {
+      if (timeout === 0) return [];
+      if (queue.length > 0) return [queue.shift()];
+      // The poll loop runs ahead of the turn, so wait for the card instead of
+      // racing it: the press is only meaningful once the picker is on screen.
+      while (cards.length === 0 && !signal.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      if (nextUpdate === 300) {
+        nextUpdate = 301;
+        const button = cards[0].markup.inline_keyboard[0][0];
+        return [{
+          update_id: 301,
+          callback_query: {
+            id: 'cb-display',
+            from: { id: 42, is_bot: false, first_name: 'Wings' },
+            message: {
+              message_id: 777,
+              date: 1_700_000_001,
+              chat: { id: 42, type: 'private' },
+            },
+            chat_instance: 'ci',
+            data: button.callback_data,
+          },
+        }];
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    },
+    sendMessage: async (request) => {
+      sent.push(request.text);
+      if (request.replyMarkup) {
+        cards.push({ text: request.text, markup: request.replyMarkup });
+        return { message_id: 777 };
+      }
+      return { message_id: 800 + sent.length };
+    },
+    editMessageText: async (request) => {
+      edits.push(request);
+      return true;
+    },
+  };
+  const runtime = new TelegramRuntime({
+    config: { botId: 'telegram_display_press', platformId: '123456789', username: 'HarnessBot' },
+    token: '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456',
+    state,
+    createApi: () => fakeApi,
+    logger: { error() {}, warn() {}, info() {}, debug() {} },
+    harness: { ensureRunning: async () => true },
+    onPresentationLevelChange: async (level) => { saved.push(level); },
+  });
+  await runtime.start();
+  try {
+    const deadline = Date.now() + 4_000;
+    while (edits.length === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(saved, ['minimal'], 'the press persisted the chosen rung through the channel hook');
+    assert.equal(edits.length, 1, 'the picker repainted in place');
+    assert.match(edits[0].text, /当前：极简/u);
+    const repainted = edits[0].replyMarkup.inline_keyboard.flat();
+    assert.equal(repainted.length, 3);
+    assert.ok(repainted.every((button) => /^d1\|/u.test(button.callback_data)));
+    assert.ok(repainted.some((button) => /✓/u.test(button.text)), 'the new rung is marked');
+    assert.ok(acks.some((ack) => /极简/u.test(ack.text ?? '')), 'the press is acknowledged with the new rung');
+    assert.equal(runtime.status.ready, true, 'the bot stayed connected: no reconnect for a display change');
+  } finally {
+    await runtime.stop();
+  }
+});
