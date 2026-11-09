@@ -16,7 +16,9 @@ const CHAT_ID = 42;
  * gets to "what the reader's chat receives", and it is what pins the three
  * display rungs to an actual call sequence.
  */
-async function runTurn(t, { presentationLevel, legacyThinkingTraces } = {}) {
+async function runTurn(t, {
+  presentationLevel, legacyThinkingTraces, numbering = false, intervalSeconds = 0,
+} = {}) {
   const directory = await mkdtemp(join(tmpdir(), `dsh-im-level-${presentationLevel ?? 'legacy'}-`));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const state = await new TelegramStateStore(join(directory, 'state.json')).load();
@@ -71,6 +73,8 @@ async function runTurn(t, { presentationLevel, legacyThinkingTraces } = {}) {
   const config = { botId: 'telegram_levels', platformId: '123456789', username: 'HarnessBot' };
   if (presentationLevel !== undefined) config.presentationLevel = presentationLevel;
   if (legacyThinkingTraces !== undefined) config.thinkingTraces = legacyThinkingTraces;
+  if (numbering) config.thinkingNumbering = true;
+  config.thinkingIntervalSeconds = intervalSeconds;
 
   const runtime = new TelegramRuntime({
     config,
@@ -145,4 +149,16 @@ test('runtime: a bot with no stored level renders the new standard default', asy
   assert.deepEqual(calls.map((call) => call.method), ['send', 'edit', 'edit', 'rich']);
   assert.match(calls[1].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → /u);
   assert.match(calls[2].text, /^✅ 完成 · \d+ 秒 · 1 步$/u);
+});
+
+test('runtime/full with numbering: the outcome keeps the frame number', async (t) => {
+  // A numbered trace line is rewritten when its result lands; dropping the number
+  // there would break the sequence the reader is following.
+  const calls = await runTurn(t, { presentationLevel: 'full', numbering: true, intervalSeconds: 0 });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
+  const sent = /^(\d+) 🔧 bash → ls$/u.exec(calls[1].text);
+  assert.ok(sent, `the tool line carries its frame number, got ${calls[1].text}`);
+  const edited = /^(\d+) 🔧 bash → ls · ✓ \d+\.\ds$/u.exec(calls[2].text);
+  assert.ok(edited, `the settled line keeps a frame number, got ${calls[2].text}`);
+  assert.equal(edited[1], sent[1], 'the number is the same before and after the edit');
 });

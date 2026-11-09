@@ -1373,12 +1373,20 @@ export class TelegramBotClient {
         void sendHeld();
       }, Math.max(0, windowEndsAt - Date.now()));
     };
-    /** One frame: immediate outside a window, otherwise the newest held one. */
+    /**
+     * One frame: immediate outside a window, otherwise the newest held one.
+     * Resolves to the delivered message plus the text it actually carries (the
+     * numbered form), so a later edit can rewrite that line without losing the
+     * number the reader is following.
+     */
     const emit = (label, text) => {
-      if (closed) return Promise.resolve();
+      if (closed) return Promise.resolve(null);
       sequence += 1;
       const frame = { label, text: numbering ? `${sequence} ${text}` : text };
-      if (intervalMs <= 0) return track(frame.label, frame.text);
+      const release = (draft) => track(draft.label, draft.text).then((messageId) => (
+        messageId === null || messageId === undefined ? null : { messageId, text: draft.text }
+      ));
+      if (intervalMs <= 0) return release(frame);
       if (Date.now() >= windowEndsAt) {
         // The deadline has passed but its timer may not have run yet, and that
         // callback would deliver the frame this newer one supersedes. Drop both
@@ -1386,12 +1394,12 @@ export class TelegramBotClient {
         clearWindowTimer();
         held = null;
         windowEndsAt = Date.now() + intervalMs;
-        return track(frame.label, frame.text);
+        return release(frame);
       }
       // Inside the window: replace whatever waited, never append.
       held = frame;
       armWindowTimer();
-      return Promise.resolve();
+      return Promise.resolve(null);
     };
     return {
       get messageId() {
@@ -1411,13 +1419,16 @@ export class TelegramBotClient {
       // the same message is edited to carry the outcome and how long it took,
       // instead of adding another line to the chat.
       sendToolTrace: async (name, argumentsValue, callId) => {
-        const text = formatToolTrace(name, argumentsValue);
         const startedAt = Date.now();
-        const messageId = await emit('tool trace', text);
-        if (callId !== undefined && callId !== null && Number.isSafeInteger(messageId)) {
-          toolCalls.set(String(callId), { messageId, text, startedAt });
+        const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue));
+        if (callId !== undefined && callId !== null && delivered) {
+          toolCalls.set(String(callId), {
+            messageId: delivered.messageId,
+            text: delivered.text,
+            startedAt,
+          });
         }
-        return messageId;
+        return delivered?.messageId ?? null;
       },
       settleToolTrace: async ({ callId, ok = true } = {}) => {
         const key = callId === undefined || callId === null ? null : String(callId);
