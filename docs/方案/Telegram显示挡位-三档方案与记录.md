@@ -37,6 +37,7 @@
 | F6 | 卡片命名空间 `d1|<nonce>|<level>`，TTL 30 分钟，首按认领；**每次按完换新 nonce 再重绘**，所以卡片可反复用，点当前项也不死 | `display-card.mjs` |
 | F7 | 配置落盘 `presentationLevel`，未知值回落标准；写入挡位时删掉旧布尔 | `telegram/config-store.mjs`、`telegram-controller.mjs` |
 | F10 | 全面挡位的工具结果用编辑同一条消息实现（`formatToolOutcome`），不额外发消息 | `telegram-runtime.mjs` `settleToolTrace` |
+| F11 | 群聊里点/打共享本地命令（`/status`、`/menu`、`/display` 等）算「已点名」，不再被群触发规则静默丢弃；普通文字与未知 slash 仍按规则处理 | `telegram-runtime.mjs`（`isSharedLocalCommand`）、`command-permission.mjs` |
 | F9 | 切换挡位**不重连**：配置落盘后把新挡位推给在跑的 runtime/bridge，下一回合即生效，不会 abort 其它聊天的在飞回合 | `telegram-controller.mjs`、`token-bot-controller.mjs`（`restart:false`）、`telegram-runtime.mjs#setPresentationLevel` |
 | F8 | RPC `bot.presentation-level.set` + 设置页下拉 | `plugin-src/host/channels/shared/presentation-level-rpc.mjs`、`rpc.mjs`、`thinking-traces.js` |
 
@@ -61,7 +62,7 @@
 命令（在 `~/Code_Project/dsh-im-build`）：
 
 ```bash
-node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5085 例：5084 通过、0 失败
+node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5088 例：5087 通过、0 失败
 npm run build && npm pack && node scripts/verify-package.mjs
 ```
 

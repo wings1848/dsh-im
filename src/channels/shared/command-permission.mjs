@@ -4,6 +4,7 @@ import { isClearCommand } from './clear-command.mjs';
 import { isControlCommand } from './control-command.mjs';
 import { isHistoryCommand } from './history-command.mjs';
 import { isModelCommand } from './model-command.mjs';
+import { isMenuCommand } from './menu-command.mjs';
 import { isPresetCommand } from './preset-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
@@ -26,6 +27,10 @@ export function isSharedLocalCommand(text, {
     isControlCommand(command)
     || isModelCommand(command)
     || isPresetCommand(command)
+    || isMenuCommand(command)
+    // `/display` is answered by the bridge from its own state, never forwarded
+    // to the model, so it belongs to the same family.
+    || /^\/display(?=$|\s)/iu.test(command)
   )) return true;
   if (hasImages || hasFiles) return false;
   return SIMPLE_TEXT_COMMANDS.has(command.toLowerCase())

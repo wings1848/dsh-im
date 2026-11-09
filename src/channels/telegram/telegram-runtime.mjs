@@ -11,6 +11,7 @@ import {
 } from '../shared/presentation-level.mjs';
 import { groupTriggerAddressed, normalizeGroupTriggers } from './group-triggers.mjs';
 import { captureContextEnhancement } from '../shared/context-enhancement.mjs';
+import { isSharedLocalCommand } from '../shared/command-permission.mjs';
 import { recoverAssistantTextByTimestamp } from '../shared/session-reply-recovery.mjs';
 import { SHARED_COMMAND_CATALOG, commandsForChannel } from '../shared/command-catalog.mjs';
 import { COMMANDS_MENU_BUTTON, TelegramApi, validateTelegramCommands } from './telegram-api.mjs';
@@ -419,15 +420,22 @@ export function normalizeTelegramUpdate(update, {
   // the per-group rule decides whether it is enough (or unnecessary).
   const tagged = String(message.reply_to_message?.from?.id ?? '') === String(botId)
     || mentionedUsername(message, username);
-  const addressed = direct || groupTriggerAddressed(groupTriggers, {
-    chatId: String(chatId),
-    senderId: String(senderId),
-    tagged,
-  });
   const messageThreadId = Number.isSafeInteger(message.message_thread_id)
     ? message.message_thread_id : undefined;
   const image = telegramImageSource(message, loadFile);
   const file = telegramFileSource(message, loadFileStream);
+  // A command typed in a group is addressed to the bot by definition — that is
+  // what the command menu in a group is for. Ordinary text still obeys the
+  // per-chat trigger rule below, so "mention only" keeps its meaning.
+  const localCommand = isSharedLocalCommand(
+    typeof message.text === 'string' ? message.text : '',
+    { hasImages: Boolean(image), hasFiles: Boolean(file) },
+  );
+  const addressed = direct || localCommand || groupTriggerAddressed(groupTriggers, {
+    chatId: String(chatId),
+    senderId: String(senderId),
+    tagged,
+  });
   // Voice notes carry no text; a speech service later fills `content` in.
   const voice = telegramVoiceSource(message);
   const conversationId = messageThreadId === undefined

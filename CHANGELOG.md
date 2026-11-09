@@ -29,9 +29,12 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 全面挡位的工具结果不再另发一条消息，而是把 `· ✓ 0.8s` / `· ⚠️ 失败 0.8s` 回写到该工具自己的那一行；标准挡位在模型开始写答案时把占位行换成「✍️ 正在整理回复」。
   In the full rung a tool result edits its own trace line (`· ✓ 0.8s` / `· ⚠️ failed 0.8s`) instead of adding a message; the standard rung switches its line to “✍️ Writing the reply” once the model starts answering.
 
+- 群聊里发送共享本地命令（`/status`、`/menu`、`/display` 等）现在一律算「已点名」：命令菜单在群组里点下去真的会有反应，不再被「仅 @ 时回复」规则静默丢弃；普通文字与未知 slash 命令仍按原规则处理。
+  Shared local commands (`/status`, `/menu`, `/display`, …) now count as addressed in groups, so tapping the group command menu actually works instead of being silently dropped by the mention-only rule; ordinary text and unknown slash text keep the old rule.
+
 ### Tests / 测试
 
-- 全量 5085 例：5084 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
+- 全量 5088 例：5087 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
 
 
 ## [5.10.0] - 2026-11-04
