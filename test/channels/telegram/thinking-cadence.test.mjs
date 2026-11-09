@@ -419,7 +419,11 @@ test('the combined settings card saves cadence and the send limit through their 
   });
   t.after(() => act(() => renderer.unmount()));
   await act(async () => {
-    renderer.root.findByType('select').props.onChange({ target: { value: '7' } });
+    // The card now leads with the display-level select, so the cadence select is
+    // the second one in document order.
+    const selects = renderer.root.findAllByType('select');
+    assert.equal(selects.length, 2);
+    selects[1].props.onChange({ target: { value: '7' } });
   });
   await act(async () => {
     renderer.root.findAllByProps({ type: 'checkbox' })[1].props.onChange({ target: { checked: false } });

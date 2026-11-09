@@ -1,0 +1,145 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+
+import { TelegramRuntime } from '../../../src/channels/telegram/telegram-runtime.mjs';
+import { TelegramStateStore } from '../../../src/channels/telegram/state-store.mjs';
+
+const TOKEN = '123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456';
+const CHAT_ID = 42;
+
+/**
+ * One full turn through the real runtime (config → bridge → bot client → Bot API
+ * calls), with the API replaced by a recorder. This is the closest a unit test
+ * gets to "what the reader's chat receives", and it is what pins the three
+ * display rungs to an actual call sequence.
+ */
+async function runTurn(t, { presentationLevel, legacyThinkingTraces } = {}) {
+  const directory = await mkdtemp(join(tmpdir(), `dsh-im-level-${presentationLevel ?? 'legacy'}-`));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const state = await new TelegramStateStore(join(directory, 'state.json')).load();
+  const calls = [];
+  let placeholderId = 900;
+  let delivered = false;
+
+  const fakeApi = {
+    getMe: async () => ({ id: 123456789, is_bot: true, username: 'HarnessBot' }),
+    getWebhookInfo: async () => ({ url: '' }),
+    deleteMyCommands: async () => true,
+    setMyCommands: async () => true,
+    setChatMenuButton: async () => true,
+    setMessageReaction: async () => true,
+    getUpdates: async ({ offset, timeout, signal } = {}) => {
+      if (timeout === 0) return [];
+      // The runtime expects raw Bot API updates and normalizes them itself.
+      if (offset <= 100) {
+        return [{
+          update_id: 100,
+          message: {
+            message_id: 100,
+            date: 1_700_000_000,
+            chat: { id: CHAT_ID, type: 'private' },
+            from: { id: CHAT_ID, is_bot: false, first_name: 'Wings' },
+            text: 'hello there',
+          },
+        }];
+      }
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    },
+    sendMessage: async (request) => {
+      calls.push({ method: 'send', text: request.text });
+      placeholderId += 1;
+      return { message_id: placeholderId };
+    },
+    editMessageText: async (request) => {
+      calls.push({ method: 'edit', text: request.text });
+      return true;
+    },
+    deleteMessage: async () => { calls.push({ method: 'delete' }); return true; },
+    sendRichMessage: async (request) => {
+      calls.push({ method: 'rich', text: request.richMessage?.markdown });
+      delivered = true;
+      return { message_id: 999 };
+    },
+    sendChatAction: async () => true,
+  };
+
+  const config = { botId: 'telegram_levels', platformId: '123456789', username: 'HarnessBot' };
+  if (presentationLevel !== undefined) config.presentationLevel = presentationLevel;
+  if (legacyThinkingTraces !== undefined) config.thinkingTraces = legacyThinkingTraces;
+
+  const runtime = new TelegramRuntime({
+    config,
+    token: TOKEN,
+    state,
+    createApi: () => fakeApi,
+    logger: { error() {}, warn() {}, info() {}, debug() {} },
+    allowedPrivateUserIds: [String(CHAT_ID)],
+    harness: {
+      ensureRunning: async () => true,
+      createSession: async () => 'session-levels',
+      ask: async (_sessionId, _text, options) => {
+        await options.onUpdate({ type: 'reasoning', step: 0, text: 'Let me check the directory.' });
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+        await options.onUpdate({ type: 'tool-result', callId: 'c1', toolName: 'bash', text: 'a b c' });
+        await options.onUpdate({ type: 'text', text: 'Writing the answer…' });
+        return '**final answer**';
+      },
+    },
+  });
+
+  await runtime.start();
+  try {
+    const deadline = Date.now() + 5_000;
+    while (!delivered && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(delivered, 'the turn never delivered an answer');
+    // Let the poll loop notice the abort before asserting on the recorder.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  } finally {
+    await runtime.stop();
+  }
+  return calls;
+}
+
+test('runtime/minimal: one placeholder, deleted, then the answer', async (t) => {
+  const calls = await runTurn(t, { presentationLevel: 'minimal' });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'delete', 'rich']);
+  assert.equal(calls[0].text, '正在处理…');
+  assert.match(calls[2].text, /final answer/u);
+});
+
+test('runtime/standard: one message rewritten, then collapsed into a receipt', async (t) => {
+  const calls = await runTurn(t, { presentationLevel: 'standard' });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'edit', 'edit', 'rich']);
+  assert.equal(calls[0].text, '正在处理…');
+  assert.match(calls[1].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → \{"command":"ls"\}$/);
+  assert.match(calls[2].text, /^✅ 完成 · \d+ 秒 · 1 步$/);
+  assert.match(calls[3].text, /final answer/u);
+});
+
+test('runtime/full: every thought and tool call is its own message', async (t) => {
+  const calls = await runTurn(t, { presentationLevel: 'full' });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'rich']);
+  assert.match(calls[0].text, /^💭 Let me check the directory\.$/u);
+  assert.match(calls[1].text, /^🔧 bash → /u);
+});
+
+test('runtime: the legacy toggle still elects the every-line rung', async (t) => {
+  const calls = await runTurn(t, { legacyThinkingTraces: true });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'rich']);
+});
+
+test('runtime: a bot with no stored level renders the new standard default', async (t) => {
+  // Telegram always resolves a level (`presentationLevelFromConfig`): an absent
+  // config is the compact default, not the old per-line flood.
+  const calls = await runTurn(t, {});
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'edit', 'edit', 'rich']);
+  assert.match(calls[1].text, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → /u);
+  assert.match(calls[2].text, /^✅ 完成 · \d+ 秒 · 1 步$/u);
+});
