@@ -54,15 +54,16 @@
 | 标准挡位结束时占位被改成回执 | 占位被删除 | `presentation-levels.test.mjs` L12 通过 |
 | 极简挡位零改写 | 每步一条进度 | `presentation-levels.test.mjs` L1 通过 |
 | `/display` 存在于 Telegram 菜单与 `/help` | 命令不存在 | `command-menu.test.mjs`、`command-help.test.mjs` 通过 |
+| 三挡位的**真实运行时调用序列** | 只有一种行为 | `presentation-levels-runtime.test.mjs`（5 例）：极简 `send→delete→rich`、标准 `send→edit→edit(回执)→rich`、全面 `send→send→rich` |
 
 命令（在 `~/Code_Project/dsh-im-build`）：
 
 ```bash
-node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5076 例：5075 通过、0 失败
+node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5081 例：5080 通过、0 失败
 npm run build && npm pack && node scripts/verify-package.mjs
 ```
 
-产物：`xmanrui-dsh-im-5.10.1-wings.2.tgz`（517 文件，`Verified dsh-im package artifacts.`）。
+产物：`xmanrui-dsh-im-5.10.1-wings.2.tgz`（517 文件，`Verified dsh-im package artifacts.`，sha256 `56ce0dd9…`），已复制到 `~/.dsh/local-packages/` 待装。
 
 ## 5. 未完成（下一轮）
 
