@@ -89,3 +89,18 @@ npm run build && npm pack && node scripts/verify-package.mjs
 1. **真机截图验收**未做：wings-gpd 的图形会话处于锁屏（`loginctl` `LockedHint=yes`），无法用 computer-use 操作 Telegram 客户端；需要用户解锁或提供临时 bot。
 2. 全面挡位的工具结果标记（✓/✗ + 耗时）仍可加强：现在工具行只有 `🔧 name → 摘要`，`tool-result` 事件未回写那一行。
 3. `/status` 可增加「当前挡位」一行（现在只有设置页与 `/display` 能看到）。
+
+## 6. 宿主级端到端实测（2026-11-10，无需 Telegram 账号）
+
+做法：在隔离的 `DSH_HOME=/tmp/dsh-e2e` 里装本仓打出的 `5.10.1-wings.2`，用本地 CONNECT 代理 + 自签 CA 冒充 `api.telegram.org`（脚本 `/tmp/e2e/mock-telegram.mjs`），让真 `dsh web` 带着插件连上一个假 bot，脚本化推送两条更新：私聊 `/display`、按钮「极简」，再推一条**群里没 @ 的 `/help`**。
+
+| 观察点 | 实测 |
+| --- | --- |
+| 连接与菜单 | `getMe` → `getWebhookInfo` → 两次 `setMyCommands`（私聊 24 条 / 群 19 条，**首项都是 `menu`**，含 `display`）→ `deleteMyCommands`（清默认 scope）→ `setChatMenuButton` |
+| `/display` | 发出一条带 3 个按钮的消息：`◻️ Minimal` / `✓ Standard (current)` / `◻️ Full`，`callback_data` 形如 `d1|<nonce>|minimal` |
+| 按钮按下 | `editMessageText` **原地重绘**：正文变 `Current: Minimal`，按钮变 `✓ Minimal (current)`，并换新 nonce；机器人在线状态不变（没有重连） |
+| 群聊命令 | 群里发 `/help`（不带 @）→ 回了帮助卡（25 条命令、6 个分区按钮）——证明群命令不再被「仅 @ 时回复」吞掉 |
+| 落盘 | `integrations/dsh-telegram/config.json` 出现 `presentationLevel: "minimal"`，旧的 `thinkingTraces` **已被删除** |
+| 运行时状态 | management RPC `connection.status` 返回 `state: connected`、`presentationLevel: minimal`、`thinkingTraces: false` |
+
+复现要点（踩过的坑）：假 token 必须是 `数字:35 字符`，否则连接在 `runtime.prepare` 阶段就失败；`getUpdates({offset:-1})` 是游标探测，不能回放脚本更新；`pnpm` 会按路径缓存 tarball，换包后要删 `node_modules/@xmanrui` 再 `dsh plugin install`，否则装到的还是旧构建（这坑让群命令实测一开始“失败”）。
