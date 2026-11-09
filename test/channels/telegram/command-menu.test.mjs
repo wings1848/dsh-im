@@ -18,7 +18,7 @@ const MAIN_MENU_NAMES = [
   'new', 'compact', 'clear', 'history', 'workspace', 'conv',
   'sessionlist', 'session', 'models', 'reasoninglist', 'reasoning', 'model',
   'presetlist', 'preset', 'stop', 'steer', 'batch', 'send', 'cancel',
-  'status', 'version', 'help',
+  'status', 'display', 'version', 'help',
 ];
 const HIDDEN_ALIASES = [
   'ws', 'conversation', 'thread', 'workspaces', 'wsl', 'sessions',
@@ -53,7 +53,7 @@ const DOCUMENTED_ALIASES = [
 ];
 test('hiding aliases from the native menu leaves the documented /help lines intact', () => {
   const help = commandHelpLines('telegram');
-  assert.equal(help.length, 30);
+  assert.equal(help.length, 32);
   for (const alias of DOCUMENTED_ALIASES) {
     assert.ok(help.some((line) => line.includes(`/${alias}`)), alias);
   }

@@ -3,7 +3,15 @@ import { randomBytes, randomUUID } from 'node:crypto';
 
 import { createDeferredDeliveryCoordinator, deferredOutcomeText } from './deferred-delivery-coordinator.mjs';
 import { t } from './i18n.mjs';
-import { commandHelpLines, commandHelpSections } from './command-catalog.mjs';
+import { commandHelpLines, commandHelpSections, commandsForChannel } from './command-catalog.mjs';
+import {
+  DEFAULT_PRESENTATION_LEVEL,
+  createTurnProgress,
+  normalizePresentationLevel,
+  parsePresentationLevelInput,
+  presentationLevelFromConfig,
+  presentationLevelLabel,
+} from './presentation-level.mjs';
 import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
@@ -101,6 +109,13 @@ const FILE_ONLY_COMPLETION_TEXT = '任务已完成。';
 const MAX_DELIVERY_ATTEMPTS = 3;
 /** How many plain-text messages one coalescing window folds into one dispatch. */
 const MAX_COALESCE_MEMBERS = 8;
+/**
+ * `standard` mode rewrites one placeholder: edits are cheaper than messages but
+ * still hit a rate limit, so a burst of tool events collapses into the newest
+ * line. The tick keeps the elapsed counter honest during a silent tool run.
+ */
+const PROGRESS_EDIT_INTERVAL_MS = 1_200;
+const PROGRESS_TICK_MS = 10_000;
 
 function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -210,7 +225,9 @@ export class TextHarnessBridge {
   #deferred;
   #contextEnhancement;
   #accessPolicy;
-  #thinkingTraces;
+  // How much of a turn reaches this chat: minimal | standard | full. One value
+  // decides both the stream a turn opens and the frames it may rewrite.
+  #presentationLevel;
   #status;
   #logger;
   #replyTimeoutMs;
@@ -245,6 +262,10 @@ export class TextHarnessBridge {
   #helpCard;
   #statusCard;
   #convCard;
+  // Three-way display picker for `/display`; null keeps the text answer.
+  #displayCard;
+  // Persists a new display level (a bot-config write owned by the channel).
+  #onPresentationLevelChange;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -265,7 +286,11 @@ export class TextHarnessBridge {
     state,
     contextEnhancement,
     accessPolicy,
-    thinkingTraces = false,
+    // A channel that knows its display level passes it. Without one, the older
+    // boolean is honoured — `thinkingTraces: true` is the `full` rung — and a
+    // channel that passes neither keeps the compact default.
+    presentationLevel = null,
+    thinkingTraces = null,
     status = createTextBridgeStatus(),
     logger = console,
     replyTimeoutMs = 600_000,
@@ -282,6 +307,8 @@ export class TextHarnessBridge {
     helpCard = null,
     statusCard = null,
     convCard = null,
+    displayCard = null,
+    onPresentationLevelChange = null,
     approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
@@ -297,7 +324,13 @@ export class TextHarnessBridge {
     this.#state = state;
     this.#contextEnhancement = contextEnhancement;
     this.#accessPolicy = accessPolicy;
-    this.#thinkingTraces = thinkingTraces;
+    // null means "this channel never opted in": it keeps the pre-level
+    // behaviour exactly (tool lines as `正在使用…`, answer previews, no receipt).
+    // Only a channel that passes a level, or the legacy thinking-traces toggle,
+    // switches to one of the three rungs.
+    this.#presentationLevel = presentationLevel === null || presentationLevel === undefined
+      ? (thinkingTraces === true ? 'full' : thinkingTraces === false ? 'standard' : null)
+      : normalizePresentationLevel(presentationLevel);
     this.#status = status;
     this.#logger = logger;
     this.#replyTimeoutMs = replyTimeoutMs;
@@ -314,6 +347,10 @@ export class TextHarnessBridge {
     this.#helpCard = helpCard ?? null;
     this.#statusCard = statusCard ?? null;
     this.#convCard = convCard ?? null;
+    this.#displayCard = displayCard ?? null;
+    this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
+      ? onPresentationLevelChange
+      : null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
     // sender's own mid-turn follow-ups into the in-flight turn instead of
@@ -1193,9 +1230,17 @@ export class TextHarnessBridge {
     // running tool call. Declared outside the try so every exit path (including
     // pre-prompt failures like image parsing) clears the timer.
     let keepaliveTimer = null;
+    // `standard` mode keeps its single placeholder moving during a long silent
+    // tool call; null on every other rung, so their timers are untouched.
+    let progressTimer = null;
+    // The compact runner is created inside the try but read by the failure
+    // handler, which lives in the catch: the receipt must survive a throw.
+    let turnProgress = null;
     const stopKeepalive = () => {
       if (keepaliveTimer !== null) clearInterval(keepaliveTimer);
       keepaliveTimer = null;
+      if (progressTimer !== null) clearInterval(progressTimer);
+      progressTimer = null;
     };
     try {
       this.#signal?.throwIfAborted();
@@ -1245,6 +1290,14 @@ export class TextHarnessBridge {
         if (status.statusSnapshot
           && await this.#presentStatusCard(target, conversationKey, status.statusSnapshot)) return;
         await this.#bot.sendText(target, status.message);
+        return;
+      }
+      // `/display` is the one place a reader tunes how much of a turn the chat
+      // shows. A keyboard channel gets three buttons; every other channel gets
+      // the same three names as text, so the setting exists everywhere.
+      if (!hasImages && !hasFiles && isBareCommand(command, '/display')
+        && this.#supportsDisplayCommand()) {
+        await this.#runDisplayCommand({ target, command, conversationKey });
         return;
       }
       // Bare /session opens the same picker as /sessionlist when the channel can
@@ -1320,7 +1373,8 @@ export class TextHarnessBridge {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
       });
       let streamFinished = false;
-      if (this.#thinkingTraces && typeof this.#bot.openThinkingStream === 'function') {
+      const level = this.#presentationLevel;
+      if (level === 'full' && typeof this.#bot.openThinkingStream === 'function') {
         try {
           stream = await this.#bot.openThinkingStream(this.#turnDeliveryTarget(target, conversationKey));
           thinkingStream = true;
@@ -1355,8 +1409,23 @@ export class TextHarnessBridge {
         }
       }
       const thinkingMode = Boolean(stream
-        && this.#thinkingTraces
+        && level === 'full'
         && typeof stream.sendToolTrace === 'function');
+      // The compact runner behind `standard`: it counts steps and composes the
+      // one line the placeholder is rewritten with. Null for the other rungs, so
+      // their update paths stay exactly as they were.
+      turnProgress = stream && level === 'standard' ? createTurnProgress() : null;
+      // Rewrite the placeholder, but not more than once per window: a burst of
+      // tool events looks the same as its last event, and every extra edit is
+      // rate the final answer may need.
+      let lastProgressPushAt = 0;
+      const pushProgress = async (line) => {
+        if (!stream || !line) return;
+        const now = Date.now();
+        if (now - lastProgressPushAt < PROGRESS_EDIT_INTERVAL_MS) return;
+        lastProgressPushAt = now;
+        await stream.update(semanticStream ? createTextDeliveryBlock(line, 'plain') : line);
+      };
       // What the model sees. A message may carry two texts: `controlText`, the
       // plain body the parsers read, and `content`, the same body decorated for
       // the model — the email channel prefixes the mail headers there, so a
@@ -1433,6 +1502,24 @@ export class TextHarnessBridge {
         }, this.#keepaliveIntervalMs);
         keepaliveTimer.unref?.();
       }
+      // Same reasoning for the compact line: a tool that runs for a minute would
+      // otherwise leave the placeholder frozen at "处理中 · 3 秒", which reads as
+      // a dead bot. The tick only touches the elapsed number.
+      if (turnProgress) {
+        let ticking = false;
+        progressTimer = setInterval(async () => {
+          if (ticking) return;
+          ticking = true;
+          try {
+            await pushProgress(turnProgress.runningText());
+          } catch {
+            // A rejected edit must never end the turn.
+          } finally {
+            ticking = false;
+          }
+        }, PROGRESS_TICK_MS);
+        progressTimer.unref?.();
+      }
       // From here the conversation has a turn in flight that this sender
       // opened: the auto-steer lane keys its authorship decision off this
       // record, and the finally below retires it when the turn settles.
@@ -1476,10 +1563,11 @@ export class TextHarnessBridge {
           signal: this.#signal,
           control: { owner: this, key: conversationKey },
           // Thinking mode needs every update (reasoning + tool calls) in
-          // order; latest mode filters as before. Only thinking mode subscribes
-          // to reasoning updates, so default-mode consumers on other channels
-          // never see them (their progress handlers would render update.text).
-          progressMode: thinkingMode ? 'all' : undefined,
+          // order, and `standard` needs every tool call to count its steps; the
+          // latest-only filter would let a burst collapse into one step. Only
+          // thinking mode subscribes to reasoning updates, so a compact consumer
+          // never sees (nor renders) the model's reasoning text.
+          progressMode: thinkingMode || turnProgress ? 'all' : undefined,
           reasoning: thinkingMode,
           onUpdate: stream ? async (update) => {
             if (thinkingMode) {
@@ -1492,7 +1580,28 @@ export class TextHarnessBridge {
               }
               return;
             }
+            if (turnProgress) {
+              // `standard`: one placeholder, rewritten with a two-line summary.
+              // The tool result is not echoed — its payload is the model's
+              // business — only the step's outcome is remembered. Other update
+              // types fall through, so a channel that can preview the answer
+              // keeps doing so while this one already shows the compact line.
+              if (update.type === 'tool') {
+                turnProgress.tool(update.name, update.arguments);
+                await pushProgress(turnProgress.runningText());
+                return;
+              }
+              if (update.type === 'tool-result') {
+                turnProgress.settle({
+                  ok: update.errorCode === undefined && update.error === undefined,
+                });
+                return;
+              }
+            }
             if (update.type === 'reasoning') return;
+            // `minimal` shows nothing while the turn runs: the reader asked for
+            // the answer, not for the machinery.
+            if (level === 'minimal') return;
             // A carrier that delivers the answer as its own message must not
             // stream that answer into itself first: the reader would see the
             // reply twice, and every preview costs an edit.
@@ -1548,10 +1657,20 @@ export class TextHarnessBridge {
       // log together with the reference id the user is shown.
       let deliveryEvidence = null;
       if (stream) {
+        const answerBlock = semanticStream || thinkingStream
+          ? createTextDeliveryBlock(visibleAnswer, answerFormat)
+          : visibleAnswer;
+        // A stream that keeps a single placeholder can collapse it into a
+        // one-line receipt instead of deleting it, so the reader still sees how
+        // long the turn took and how many steps it cost. Channels that do not
+        // declare the capability keep receiving exactly what they did before.
+        const finalBlock = stream.supportsProgressSummary === true && turnProgress
+          ? { ...(answerBlock && typeof answerBlock === 'object'
+            ? answerBlock
+            : { text: String(answerBlock ?? ''), format: 'plain' }), progressSummary: turnProgress.doneText() }
+          : answerBlock;
         try {
-          const result = await stream.finish(semanticStream || thinkingStream
-            ? createTextDeliveryBlock(visibleAnswer, answerFormat)
-            : visibleAnswer);
+          const result = await stream.finish(finalBlock);
           streamFinished = true;
           deliveryEvidence = result?.deliveryEvidence ?? deliveryEvidence;
           textReceipt = createDeliveryReceipt({
@@ -1682,6 +1801,8 @@ export class TextHarnessBridge {
           ? 'fail'
           : (typeof stream?.finish === 'function' ? 'finish' : null);
         if (!method) return false;
+        // A failed turn leaves no receipt: the error message is its terminal
+        // state, and a stale "已中断" line above it is clutter, not evidence.
         try {
           const result = await stream[method](text);
           return method === 'fail'
@@ -2064,6 +2185,29 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a /conv press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /display picker owns its namespace: a press saves the level and
+    // repaints the three buttons in place. Saving restarts the bot runtime, so
+    // the card repaints before the write — a restart can never leave the reader
+    // looking at a button that contradicts the stored value.
+    if (this.#displayCard && typeof this.#displayCard.handlePress === 'function') {
+      const handled = await this.#displayCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        current: this.#presentationLevel,
+        apply: async (level) => {
+          await this.#applyPresentationLevel(level);
+          return this.#presentationLevel;
+        },
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /display press:`,
           error,
         );
         return false;
@@ -2900,6 +3044,101 @@ export class TextHarnessBridge {
     return presented;
   }
 
+
+  /**
+   * Whether `/display` means anything here.
+   *
+   * The command is advertised only on channels whose catalog entry says so (see
+   * `command-catalog.mjs`): a channel that cannot collapse a turn would accept
+   * the word and then render exactly as before, which is worse than not
+   * offering it.
+   */
+  #supportsDisplayCommand() {
+    return commandsForChannel(this.#descriptor.key)
+      .some((item) => item.name === 'display');
+  }
+
+  /** The level this bridge currently renders turns at. */
+  get presentationLevel() {
+    return this.#presentationLevel;
+  }
+
+  /**
+   * `/display` — read or change how much of a turn this chat shows.
+   *
+   * Bare: the picker card when the channel carries a keyboard, the same three
+   * options as text otherwise. With an argument: switch directly and confirm,
+   * so a phone user can type `/display 极简` without opening a card.
+   */
+  async #runDisplayCommand({ target, command, conversationKey }) {
+    const argument = command.slice('/display'.length).trim();
+    if (!argument) {
+      if (this.#displayCard
+        && typeof this.#bot?.sendInteractionCard === 'function'
+        && await this.#displayCard.present({
+          bot: this.#bot,
+          target,
+          conversationKey,
+          current: this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
+        })) return;
+      await this.#bot.sendText(target, this.#displayText());
+      return;
+    }
+    const level = parsePresentationLevelInput(argument);
+    if (!level) {
+      await this.#bot.sendText(target, t('用法：/display 极简、/display 标准 或 /display 全面'));
+      return;
+    }
+    try {
+      await this.#applyPresentationLevel(level);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not save the display level:`,
+        error?.message ?? error,
+      );
+      await this.#bot.sendText(target, t('显示挡位保存失败，请稍后重试。'));
+      return;
+    }
+    await this.#bot.sendText(target, t('显示挡位已设为「{level}」。', {
+      level: presentationLevelLabel(level),
+    }));
+  }
+
+  /**
+   * Persist a new level. The channel writes its own bot config and restarts the
+   * runtime, so the value is claimed locally first: the reply the caller sends
+   * after this returns already describes the new state.
+   */
+  async #applyPresentationLevel(level) {
+    const previous = this.#presentationLevel;
+    // A channel that never opted in still reads as the compact default, so
+    // choosing 「标准」 there must persist rather than look like a no-op.
+    const current = previous ?? DEFAULT_PRESENTATION_LEVEL;
+    const next = normalizePresentationLevel(level, current);
+    if (next === current) return;
+    this.#presentationLevel = next;
+    if (!this.#onPresentationLevelChange) return;
+    try {
+      await this.#onPresentationLevelChange(next);
+    } catch (error) {
+      this.#presentationLevel = previous;
+      throw error;
+    }
+  }
+
+  /** The text answer for `/display` on a channel without a card. */
+  #displayText() {
+    const current = presentationLevelLabel(this.#presentationLevel ?? DEFAULT_PRESENTATION_LEVEL);
+    return [
+      t('🎛 显示挡位：{level}', { level: current }),
+      '',
+      t('极简  只看最终答案'),
+      t('标准  一条进度消息，结束时收成一行'),
+      t('全面  思考与工具调用逐条显示'),
+      '',
+      t('发送 /display 极简、/display 标准 或 /display 全面 切换。'),
+    ].join('\n');
+  }
 
   async #presentHelpCard(target, conversationKey) {
     if (!this.#helpCard || typeof this.#helpCard.present !== 'function') return false;

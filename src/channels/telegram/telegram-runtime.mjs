@@ -4,6 +4,11 @@ import { extractConnectionEvidence, createConnectionDiagnostics, atConnectionSta
 import { createEditableMessageStream } from '../shared/editable-message-stream.mjs';
 import { createTextDeliveryBlock } from '../shared/semantic/delivery.mjs';
 import { t } from '../shared/i18n.mjs';
+import {
+  DEFAULT_PRESENTATION_LEVEL,
+  normalizePresentationLevel,
+  presentationLevelFromConfig,
+} from '../shared/presentation-level.mjs';
 import { groupTriggerAddressed, normalizeGroupTriggers } from './group-triggers.mjs';
 import { captureContextEnhancement } from '../shared/context-enhancement.mjs';
 import { recoverAssistantTextByTimestamp } from '../shared/session-reply-recovery.mjs';
@@ -569,6 +574,9 @@ class TelegramDeliveryStream {
   #keepalive = false;
   #previewAnswer = true;
   #uniqueFrames = false;
+  // Declares that finish()/fail() carry the compact turn receipt, so the
+  // bridge only sends one to a stream that knows what to do with it.
+  supportsProgressSummary = false;
   #previewStopped = false;
   #chain = Promise.resolve();
 
@@ -583,6 +591,7 @@ class TelegramDeliveryStream {
     keepalive = false,
     previewAnswer = true,
     uniqueFrames = false,
+    supportsProgressSummary = false,
   }) {
     this.#update = update;
     this.#finish = finish;
@@ -603,6 +612,7 @@ class TelegramDeliveryStream {
     // identical-text shortcut would swallow every frame after the first and the
     // reader would still watch a frozen placeholder.
     this.#uniqueFrames = uniqueFrames === true;
+    this.supportsProgressSummary = supportsProgressSummary === true;
   }
 
   /** Whether answer text may be shown in the carrier before it is delivered. */
@@ -680,7 +690,12 @@ class TelegramDeliveryStream {
     return this.#enqueue(async () => {
       if (this.#closed) throw new Error('Message stream is already closed');
       this.#closed = true;
-      const result = await this.#finish(createTextDeliveryBlock(value));
+      // `createTextDeliveryBlock` normalises the text fields and drops anything
+      // else, so the compact receipt is copied across explicitly; a stream whose
+      // `supportsProgressSummary` is false never receives one.
+      const receipt = typeof value?.progressSummary === 'string' ? value.progressSummary : null;
+      const block = createTextDeliveryBlock(value);
+      const result = await this.#finish(receipt ? { ...block, progressSummary: receipt } : block);
       this.#providerMessageIds.push(...(result?.providerMessageIds ?? []));
       return result;
     });
@@ -690,7 +705,9 @@ class TelegramDeliveryStream {
     return this.#enqueue(async () => {
       if (this.#closed) return undefined;
       this.#closed = true;
-      const result = await this.#fail(createTextDeliveryBlock(text, 'plain'));
+      const receipt = typeof text?.progressSummary === 'string' ? text.progressSummary : null;
+      const block = createTextDeliveryBlock(text, 'plain');
+      const result = await this.#fail(receipt ? { ...block, progressSummary: receipt } : block);
       this.#providerMessageIds.push(...(result?.providerMessageIds ?? []));
       return result;
     });
@@ -774,6 +791,7 @@ export class TelegramBotClient {
   #logger;
   #thinkingNumbering;
   #thinkingIntervalMs;
+  #presentationLevel;
 
   constructor({
     api,
@@ -781,6 +799,7 @@ export class TelegramBotClient {
     logger = console,
     thinkingNumbering = false,
     thinkingIntervalSeconds = 0,
+    presentationLevel = null,
   }) {
     this.#api = api;
     this.#signal = signal;
@@ -788,6 +807,11 @@ export class TelegramBotClient {
     // Read once: the runtime restarts whenever the owner changes either value.
     this.#thinkingNumbering = normalizeThinkingNumbering(thinkingNumbering);
     this.#thinkingIntervalMs = normalizeThinkingIntervalSeconds(thinkingIntervalSeconds) * 1_000;
+    // How much of a turn this chat shows; the bridge and the placeholder agree
+    // on it so a turn cannot open the wrong stream.
+    this.#presentationLevel = normalizePresentationLevel(
+      presentationLevel ?? DEFAULT_PRESENTATION_LEVEL,
+    );
   }
 
   async sendText(target, text) {
@@ -1196,19 +1220,38 @@ export class TelegramBotClient {
       armWindowTimer();
       return undefined;
     };
+    // The placeholder carries progress only: its last frame would be a silent
+    // edit, so the answer always goes out as its own message and Telegram
+    // notifies the reader that the turn is over. A `standard` turn is the one
+    // exception: it collapses the placeholder into a one-line receipt instead of
+    // deleting it, so the reader keeps the elapsed time and step count without
+    // paying for another message.
+    const settlePlaceholder = async (receipt) => {
+      if (typeof receipt === 'string' && receipt) {
+        try {
+          await this.#api.editMessageText({
+            chatId: target.chatId,
+            messageId,
+            text: receipt,
+            signal: this.#signal,
+          });
+          return;
+        } catch (error) {
+          this.#logger.warn?.('[dsh-im:telegram] unable to leave the turn receipt:', error);
+        }
+      }
+      await this.#deletePlaceholder(target, messageId);
+    };
     stream = new TelegramDeliveryStream({
       update: (block) => pushProgress(block),
-      // The placeholder carries progress only: its last frame would be a silent
-      // edit, so the answer goes out as its own message and Telegram notifies
-      // the reader that the turn is over.
       finish: async (block) => {
         await drainHeld();
-        await this.#deletePlaceholder(target, messageId);
+        await settlePlaceholder(block?.progressSummary);
         return this.#sendRich(target, block);
       },
       fail: async (block) => {
         await drainHeld();
-        await this.#deletePlaceholder(target, messageId);
+        await settlePlaceholder(block?.progressSummary);
         return this.#sendPlain(target, block.text);
       },
       // A cancelled turn must not wake up later and rewrite the placeholder the
@@ -1222,6 +1265,9 @@ export class TelegramBotClient {
       // Answer text is not mirrored into the placeholder: it is deleted before
       // the real message goes out, so a preview would duplicate the reply.
       previewAnswer: false,
+      // Declares that finish()/fail() understand `progressSummary`, which is what
+      // lets a compact turn keep its receipt without changing other channels.
+      supportsProgressSummary: true,
       uniqueFrames: numbering,
       logger: this.#logger,
     });
@@ -1512,6 +1558,9 @@ export class TelegramRuntime {
   // refreshCommandMenu() had nothing to push. Reconciled once startup
   // completes, so the platform always ends up with the latest language.
   #menuDirty = false;
+  // Persists a `/display` choice through the controller; null on a runtime
+  // assembled by a test or tool that owns its own config.
+  #onPresentationLevelChange = null;
 
   constructor({
     config,
@@ -1528,6 +1577,9 @@ export class TelegramRuntime {
     createApi = (options) => new TelegramApi(options),
     createHttpTransport = createTelegramHttpTransport,
     commandCatalog = SHARED_COMMAND_CATALOG,
+    // Persists a display level chosen in chat; the controller owns the config
+    // write and restarts this runtime with the stored value.
+    onPresentationLevelChange = null,
   }) {
     if (!config || !token || !harness || !state) {
       throw new TypeError('TelegramRuntime requires config, token, Harness, and state');
@@ -1556,6 +1608,9 @@ export class TelegramRuntime {
     this.#replyTimeoutMs = replyTimeoutMs;
     this.#createApi = createApi;
     this.#createHttpTransport = createHttpTransport;
+    this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
+      ? onPresentationLevelChange
+      : null;
     this.#commandCatalog = commandCatalog;
   }
 
@@ -1658,6 +1713,7 @@ export class TelegramRuntime {
           extractConnectionEvidence(error).details,
         );
       }
+      const presentationLevel = presentationLevelFromConfig(this.#config);
       const client = new TelegramBotClient({
         api,
         signal: controller.signal,
@@ -1665,6 +1721,7 @@ export class TelegramRuntime {
         // Trace frames are numbered and paced per bot; 0 seconds means no pacing.
         thinkingNumbering: this.#config?.thinkingNumbering,
         thinkingIntervalSeconds: this.#config?.thinkingIntervalSeconds,
+        presentationLevel,
       });
       this.#bridge = new TelegramHarnessBridge({
         bot: client,
@@ -1672,8 +1729,9 @@ export class TelegramRuntime {
         state: this.#state,
         contextEnhancement: this.#contextEnhancement,
         accessPolicy: this.#accessPolicy,
-        // Default ON; an explicit false in the bot config opts out.
-        thinkingTraces: this.#config?.thinkingTraces !== false,
+        // One value drives the stream a turn opens and the frames it may rewrite.
+        presentationLevel: presentationLevelFromConfig(this.#config),
+        onPresentationLevelChange: this.#onPresentationLevelChange,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,

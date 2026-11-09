@@ -50,6 +50,7 @@ export const TOKEN_BOT_ENDPOINTS = Object.freeze({
   setThinkingTraces: 'bot.thinking-traces.set',
   setThinkingCadence: SET_THINKING_CADENCE_ENDPOINT,
   setSendLimit: SET_SEND_LIMIT_ENDPOINT,
+  setPresentationLevel: 'bot.presentation-level.set',
 });
 
 export function createTokenChannelApi(channel, connectionSummary, {

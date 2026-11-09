@@ -6,6 +6,7 @@ import { TelegramApprovalCard } from './approval-card.mjs';
 import { TelegramModelCard } from './model-card.mjs';
 import { TelegramPresetCard } from './preset-card.mjs';
 import { TelegramClearCard } from './clear-card.mjs';
+import { TelegramDisplayCard } from './display-card.mjs';
 import { TelegramMenuCard } from './menu-card.mjs';
 import { TelegramHelpCard } from './help-card.mjs';
 import { TelegramStatusCard } from './status-card.mjs';

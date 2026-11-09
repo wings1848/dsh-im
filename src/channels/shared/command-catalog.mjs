@@ -2,11 +2,13 @@ import { t } from './i18n.mjs';
 
 const TEXT_CHANNELS = Object.freeze(['telegram', 'slack', 'discord', 'whatsapp', 'matrix']);
 
-function defineCatalogCommand(name, description, help, { aliases = [], ...options } = {}) {
+function defineCatalogCommand(name, description, help, { aliases = [], channels = TEXT_CHANNELS, ...options } = {}) {
   return Object.freeze({
     name,
     description,
-    channels: TEXT_CHANNELS,
+    // Frozen like the shared default: every consumer may hold this list, none
+    // may edit it in place.
+    channels: channels === TEXT_CHANNELS ? channels : Object.freeze([...channels]),
     menuVisible: true,
     ...options,
     aliases: Object.freeze(aliases.map((alias) => Object.freeze({
@@ -54,6 +56,7 @@ const GROUP_BY_COMMAND = Object.freeze({
   send: COMMAND_HELP_GROUPS.task,
   cancel: COMMAND_HELP_GROUPS.task,
   status: COMMAND_HELP_GROUPS.task,
+  display: COMMAND_HELP_GROUPS.task,
 });
 
 /** The section a command belongs to; `other` for anything unmapped. */
@@ -155,6 +158,16 @@ export const SHARED_COMMAND_CATALOG = Object.freeze([
   defineCatalogCommand('status', '检查连接状态', [
     '/status  检查连接状态',
   ]),
+  // Display rungs: the one setting a reader changes from the chat itself. The
+  // name is short because it is also typed on a phone keyboard.
+  defineCatalogCommand('display', '设置过程展示挡位（极简/标准/全面）', [
+    '/display  查看并切换过程展示挡位（极简 / 标准 / 全面）',
+    '/display 极简|标准|全面  直接切换，仅影响这个机器人',
+  ], {
+    // Only Telegram renders a turn through a placeholder it can collapse, so the
+    // command is advertised where it actually changes something.
+    channels: ['telegram'],
+  }),
   defineCatalogCommand('version', '查看插件版本', [
     '/version  查看插件版本',
   ]),

@@ -10,6 +10,10 @@ import {
   normalizeThinkingNumbering,
 } from '../shared/thinking-cadence.mjs';
 import {
+  normalizePresentationLevel,
+  presentationLevelFromConfig,
+} from '../shared/presentation-level.mjs';
+import {
   GROUP_TRIGGER_VERSION,
   groupTriggersSettings,
   normalizeGroupTriggers,
@@ -57,8 +61,10 @@ export class TelegramController extends TokenBotController {
         return {
           ...bot,
           accessPolicy,
-          // Default ON; only an explicit false in the config opts out.
-          thinkingTraces: config?.thinkingTraces !== false,
+          // The legacy checkbox reads the scale: only the full rung is "on".
+          thinkingTraces: presentationLevelFromConfig(config) === 'full',
+          // The single value the runtime actually renders with.
+          presentationLevel: presentationLevelFromConfig(config),
           thinkingNumbering: normalizeThinkingNumbering(config?.thinkingNumbering),
           // 0 means no pacing, which is also what an absent field means.
           thinkingIntervalSeconds: normalizeThinkingIntervalSeconds(config?.thinkingIntervalSeconds),
@@ -74,11 +80,26 @@ export class TelegramController extends TokenBotController {
     return this.updateBotConfig(botId, (config) => ({ ...config, ...accessPolicy }));
   }
 
+  /**
+   * Persist the three-rung display level; the runtime restarts with the new
+   * value, so the next turn already renders at that level. The legacy boolean is
+   * cleared so one setting cannot contradict the other.
+   */
+  async setPresentationLevel(botId, value) {
+    const presentationLevel = normalizePresentationLevel(value);
+    return this.updateBotConfig(botId, (config) => {
+      const { thinkingTraces: _legacy, ...rest } = config;
+      return { ...rest, presentationLevel };
+    });
+  }
+
+  /**
+   * The legacy on/off toggle still exists in the settings page, but it now means
+   * the two ends of the same scale: ON is the full rung, OFF is standard. It
+   * writes the level instead of the boolean so the two can never disagree.
+   */
   async setThinkingTraces(botId, value) {
-    return this.updateBotConfig(botId, (config) => ({
-      ...config,
-      thinkingTraces: value === true,
-    }));
+    return this.setPresentationLevel(botId, value === true ? 'full' : 'standard');
   }
 
   /**

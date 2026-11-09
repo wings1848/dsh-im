@@ -36,9 +36,9 @@ for (const [channel, label, Bridge] of [
         translate('{label}机器人已连接 DeepSeek Harness。', { label }),
         '',
         translate('直接发送文字、图片或文件即可继续当前会话。'),
-        ...legacyHelp[language],
+        ...legacyHelp[channel][language],
       ].join('\n'));
-      assert.deepEqual(commandHelpLines(channel), legacyHelp[language]);
+      assert.deepEqual(commandHelpLines(channel), legacyHelp[channel][language]);
     });
   }
 }

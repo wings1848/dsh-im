@@ -1424,7 +1424,7 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
     },
   };
   const state = memoryState();
-  const bridge = new TelegramHarnessBridge({ bot, harness, state });
+  const bridge = new TelegramHarnessBridge({ bot, harness, state, presentationLevel: 'standard' });
   await bridge.accept({
     messageId: '1', senderId: 'u1', kind: 'group', conversationId: 'g1', content: 'ignored',
     addressed: false, replyTarget: {},
@@ -1437,7 +1437,11 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
     connectionTestTarget: { chatId: 88 },
   });
   assert.equal(askCount, 1);
-  assert.deepEqual(updates, ['正在使用搜索…', '处理中']);
+  // Behaviour change (5.10.1-wings.2): the default rung is `standard`, so the
+  // tool update paints the compact summary line. The status/text frame keeps
+  // flowing through the old path.
+  assert.match(updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 搜索$/);
+  assert.deepEqual(updates.slice(1), ['处理中']);
   assert.deepEqual(sent, ['完成']);
   await bridge.sendConnectionTest('card test');
   assert.equal(sent.at(-1), 'card test');
@@ -2270,7 +2274,10 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
   const runtime = new TelegramRuntime({
     config: {
       botId: 'telegram_card',
-      thinkingTraces: false,
+      // `minimal` keeps this test on the placeholder lifecycle it was written
+      // for (one message, dropped before the answer); the compact receipt is
+      // covered by presentation-levels.test.mjs L12.
+      presentationLevel: 'minimal',
       platformId: '123456789',
       username: 'HarnessBot',
     },
@@ -2404,7 +2411,7 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
         logger: { warn() {} },
       });
       const bridge = new TelegramHarnessBridge({
-        bot: client, state, thinkingTraces: false,
+        bot: client, state, presentationLevel: 'standard',
         harness: { workspaceSession: () => session },
         logger: { warn() {}, error() {} },
       });
@@ -2435,9 +2442,14 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
           assert.deepEqual(sent.map((entry) => entry.text).filter((text) => !/已排队/.test(text)),
             ['正在处理…', 'final answer', '正在处理…', 'follow-up answer'],
             'every turn answers in its own message');
-          assert.deepEqual(edits.map((entry) => entry.messageId), [901],
-            'progress stays on the placeholder');
-          assert.deepEqual(deleted, [901, 904], 'every finished turn drops its placeholder');
+          // Default `standard`: progress and the closing receipt both stay on
+          // each turn's own placeholder, so no message is added per step.
+          assert.ok(edits.length >= 2, 'each turn writes its own placeholder');
+          assert.ok(edits.every((entry) => [901, 904].includes(entry.messageId)),
+            'progress stays on the turn’s own placeholder');
+          assert.ok(edits.some((entry) => /^✅ 完成 · /.test(entry.text)),
+            'a finished turn collapses its placeholder into a receipt');
+          assert.deepEqual(deleted, [], 'the placeholder becomes the receipt instead of being dropped');
         } else {
           await bounded(bridge.accept(incoming(101, action === 'stop' ? '/stop' : '/steer add ANDROID_OK')),
             'control command waited for the ordinary prompt queue');
@@ -2452,9 +2464,15 @@ test('Telegram private placeholder streams keep controls responsive and ordinary
           assert.ok(sent.some(({ text }) => text.includes(action === 'stop' ? '已请求停止当前任务' : '已提交补充指令')));
           assert.equal(sent.at(-1).text, action === 'stop' ? '已停止。' : 'final answer',
             'the terminal message is a new message, not a placeholder edit');
-          assert.deepEqual(edits.map((entry) => entry.messageId), [901],
+          assert.ok(edits.length >= 1, 'progress stays on the placeholder');
+          assert.ok(edits.every((entry) => entry.messageId === 901),
             'progress stays on the placeholder');
-          assert.deepEqual(deleted, [901], 'the finished turn drops its placeholder');
+          // A steered turn still finishes, so its placeholder becomes the
+          // receipt; a stopped one ends in the failure path, which drops it.
+          assert.deepEqual(deleted, action === 'stop' ? [901] : [],
+            action === 'stop'
+              ? 'the stopped turn drops its placeholder'
+              : 'the placeholder becomes the receipt instead of being dropped');
         }
         assert.equal(drafts.length, 0);
       } finally {
@@ -2477,7 +2495,7 @@ test('Telegram private placeholder creation failure still delivers the final ans
     },
   });
   const bridge = new TelegramHarnessBridge({
-    bot: client, state: memoryState(), thinkingTraces: false,
+    bot: client, state: memoryState(),
     harness: { createSession: async () => 'session-fallback', ask: async () => { asks += 1; return 'final'; } },
     logger: { warn() {}, error() {} },
   });

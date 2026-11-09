@@ -6,6 +6,26 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [5.10.1-wings.2] - 2026-11-10
+
+> 本仓是个人 fork（基线 v5.10.0 + Telegram 卡片相关分支），版本号用 `-wings.N` 后缀，避免被上游正式版覆盖。
+
+### Added / 新增
+
+- 新增「过程展示挡位」：`/display`（卡片或 `/display 极简|标准|全面`）与设置页下拉，共三挡——极简只发最终答案；标准用一条占位消息原地显示「处理中 · 秒数 · 步数 + 最近工具」，回合结束时收成一行 `✅ 完成 · 42 秒 · 5 步` 回执，再发答案；全面保持逐条 💭/🔧 消息。默认挡位改为标准，Telegram 缺省不再逐行刷屏。
+  Added a three-rung display setting (`/display` card, `/display minimal|standard|full`, and a settings-page select): minimal shows only the final answer; standard keeps one placeholder with a compact "elapsed · steps · latest tool" line and collapses it into a one-line receipt; full keeps the per-line 💭/🔧 messages. The default is now standard, so Telegram no longer floods by default.
+- 新增共享 `presentation-level.mjs`（挡位归一化、旧 `thinkingTraces` 兼容映射、紧凑进度行合成器）与 `bot.presentation-level.set` RPC。
+
+### Changed / 行为变更
+
+- `thinkingTraces` 成为挡位别名：显式 `true` 仍是全面，显式 `false` 是标准，未配置则跟随新默认标准；保存挡位会清掉旧的布尔字段，避免两个开关互相打架。
+- 其他渠道（WhatsApp/Slack/Discord 等）不传挡位时保持原有渲染完全不变。
+
+### Tests / 测试
+
+- 全量 5076 例：5075 通过、0 失败。新增 `test/channels/shared/presentation-level.test.mjs`（8 例）、`test/channels/telegram/presentation-levels.test.mjs`（14 例，含 3 个挡位的消息序列、`/display` 文本与卡片、配置持久化、回执编辑/回退删除）。
+
+
 ## [5.10.0] - 2026-11-04
 
 ### Added / 新增
