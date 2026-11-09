@@ -20,8 +20,8 @@
 | 挡位 | 过程 | 结束时 |
 | --- | --- | --- |
 | 极简 | 只有一条占位「正在处理…」，**不改写**（不暴露工具名与步数） | 删除占位 → 发送答案 |
-| 标准 | 同一条占位原地改写：`⏳ 处理中 · 12 秒 · 2 步` + `🔧 bash → npm test`；1.2 秒窗口内合并，10 秒心跳只更新秒数 | 占位**改成** `✅ 完成 · 12 秒 · 2 步` 回执 → 发送答案 |
-| 全面 | 每条 💭 思考、每条 🔧 工具调用各自一条消息（原有行为） | 发送答案（无回执） |
+| 标准 | 同一条占位原地改写：`⏳ 处理中 · 12 秒 · 2 步` + `🔧 bash → npm test`；模型开始写答案时换成 `✍️ 正在整理回复`；1.2 秒窗口内合并，10 秒心跳只更新秒数 | 占位**改成** `✅ 完成 · 12 秒 · 2 步` 回执 → 发送答案 |
+| 全面 | 每条 💭 思考、每条 🔧 工具调用各自一条消息；工具结果**回写到同一行**：`🔧 bash → npm test · ✓ 0.8s`（失败 `· ⚠️ 失败 0.8s`） | 发送答案（无回执） |
 
 失败回合：三挡位都**不**留回执，占位删除后发错误消息——错误本身就是终态，上面再压一行「已中断」是噪音。
 
@@ -33,9 +33,10 @@
 | F2 | 桥里只有一个收口：`#presentationLevel` 决定开流与帧过滤 | `text-harness-bridge.mjs` `#process`（`level`、`turnProgress`、`pushProgress`） |
 | F3 | 回执靠 `stream.supportsProgressSummary` + `progressSummary` 字段，只有声明支持的流才会收到 | `telegram-runtime.mjs` `TelegramDeliveryStream`、`openDeliveryStream` |
 | F4 | 占位改回执失败（例如 not-modified / 429）时退化为删除，绝不留过期占位 | `telegram-runtime.mjs` `settlePlaceholder` |
-| F5 | `/display` 只在声明支持的渠道出现（catalog `channels: ['telegram']`） | `command-catalog.mjs`、`text-harness-bridge.mjs` `#supportsDisplayCommand` |
+| F5 | `/display` 只在声明支持的渠道出现（catalog `channels: ['telegram']`）；`/menu` 同样收进 catalog 并放在菜单第一位，从「隐藏命令」变成可发现入口 | `command-catalog.mjs`、`text-harness-bridge.mjs` `#supportsDisplayCommand` |
 | F6 | 卡片命名空间 `d1|<nonce>|<level>`，TTL 30 分钟，首按认领；**每次按完换新 nonce 再重绘**，所以卡片可反复用，点当前项也不死 | `display-card.mjs` |
 | F7 | 配置落盘 `presentationLevel`，未知值回落标准；写入挡位时删掉旧布尔 | `telegram/config-store.mjs`、`telegram-controller.mjs` |
+| F10 | 全面挡位的工具结果用编辑同一条消息实现（`formatToolOutcome`），不额外发消息 | `telegram-runtime.mjs` `settleToolTrace` |
 | F9 | 切换挡位**不重连**：配置落盘后把新挡位推给在跑的 runtime/bridge，下一回合即生效，不会 abort 其它聊天的在飞回合 | `telegram-controller.mjs`、`token-bot-controller.mjs`（`restart:false`）、`telegram-runtime.mjs#setPresentationLevel` |
 | F8 | RPC `bot.presentation-level.set` + 设置页下拉 | `plugin-src/host/channels/shared/presentation-level-rpc.mjs`、`rpc.mjs`、`thinking-traces.js` |
 
@@ -60,7 +61,7 @@
 命令（在 `~/Code_Project/dsh-im-build`）：
 
 ```bash
-node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5084 例：5083 通过、0 失败
+node --test test/*.test.mjs test/channels/*/*.test.mjs   # 5085 例：5084 通过、0 失败
 npm run build && npm pack && node scripts/verify-package.mjs
 ```
 

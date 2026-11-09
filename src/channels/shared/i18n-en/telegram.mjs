@@ -220,4 +220,12 @@ export default {
   '/display  查看并切换过程展示挡位（极简 / 标准 / 全面）': '/display  Show and switch how much of a turn the chat shows (minimal / standard / full)',
   '/display 极简|标准|全面  直接切换，仅影响这个机器人': '/display minimal|standard|full  Switch directly; this bot only',
 
+  // /menu 收进共享 catalog（5.10.1-wings.2）
+  '打开控制台菜单': 'Open the control menu',
+  '/menu  打开控制台菜单（会话 / 工作区 / 模型 / 状态，一步直达）': '/menu  Open the control menu (Sessions / Workspace / Model / Status in one tap)',
+
+  '✍️ 正在整理回复': '✍️ Writing the reply',
+
+  '⚠️ 失败': '⚠️ failed',
+
 };

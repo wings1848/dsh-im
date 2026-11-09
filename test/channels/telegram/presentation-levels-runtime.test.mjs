@@ -84,7 +84,7 @@ async function runTurn(t, { presentationLevel, legacyThinkingTraces } = {}) {
       createSession: async () => 'session-levels',
       ask: async (_sessionId, _text, options) => {
         await options.onUpdate({ type: 'reasoning', step: 0, text: 'Let me check the directory.' });
-        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}', callId: 'c1' });
         await options.onUpdate({ type: 'tool-result', callId: 'c1', toolName: 'bash', text: 'a b c' });
         await options.onUpdate({ type: 'text', text: 'Writing the answer…' });
         return '**final answer**';
@@ -123,16 +123,19 @@ test('runtime/standard: one message rewritten, then collapsed into a receipt', a
   assert.match(calls[3].text, /final answer/u);
 });
 
-test('runtime/full: every thought and tool call is its own message', async (t) => {
+test('runtime/full: every thought and tool call is its own message, and a result edits its own line', async (t) => {
   const calls = await runTurn(t, { presentationLevel: 'full' });
-  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'rich']);
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
   assert.match(calls[0].text, /^💭 Let me check the directory\.$/u);
-  assert.match(calls[1].text, /^🔧 bash → /u);
+  assert.match(calls[1].text, /^🔧 bash → ls$/u);
+  // One call = one message: the outcome is appended to that line, not sent anew.
+  assert.match(calls[2].text, /^🔧 bash → ls · ✓ \d+\.\ds$/u);
 });
 
 test('runtime: the legacy toggle still elects the every-line rung', async (t) => {
   const calls = await runTurn(t, { legacyThinkingTraces: true });
-  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'rich']);
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
+  assert.match(calls[2].text, /· ✓ \d+\.\ds$/u);
 });
 
 test('runtime: a bot with no stored level renders the new standard default', async (t) => {

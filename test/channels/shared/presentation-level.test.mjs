@@ -99,6 +99,21 @@ test('P6: the compact line counts steps and carries elapsed time', () => {
   assert.equal(progress.steps, 2);
 });
 
+test('P6b: the line switches to "writing the reply" once the tools stop', () => {
+  let now = 1_000;
+  const progress = createTurnProgress({ now: () => now, startedAt: 1_000 });
+  progress.tool('bash', { command: 'ls' });
+  now += 3_000;
+  progress.settle({ ok: true });
+  progress.writing();
+  assert.equal(
+    progress.runningText(),
+    '⏳ 处理中 · 3 秒 · 1 步\n✍️ 正在整理回复',
+    'the last tool no longer looks like it is still running',
+  );
+  assert.equal(progress.doneText(), '✅ 完成 · 3 秒 · 1 步', 'the receipt is unchanged');
+});
+
 test('P7: a turn with no tool calls omits the step count', () => {
   const progress = createTurnProgress({ now: () => 6_000, startedAt: 1_000 });
   assert.equal(progress.doneText(), '✅ 完成 · 5 秒');

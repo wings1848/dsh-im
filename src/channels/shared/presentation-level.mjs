@@ -142,6 +142,9 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
   const start = Number.isFinite(startedAt) ? startedAt : now();
   let steps = 0;
   let last = null;
+  // Set once the model stops calling tools and starts writing its answer: the
+  // reader then sees the turn is finishing instead of a frozen last tool.
+  let writing = false;
 
   const seconds = () => Math.max(0, Math.round((now() - start) / 1_000));
 
@@ -162,6 +165,7 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
     const head = steps > 0
       ? t('⏳ 处理中 · {seconds} 秒 · {steps} 步', { seconds: elapsed, steps })
       : t('⏳ 处理中 · {seconds} 秒', { seconds: elapsed });
+    if (writing) return `${head}\n${t('✍️ 正在整理回复')}`;
     if (!last) return head;
     const icon = TOOL_ICON[last.state] ?? TOOL_ICON.running;
     const detail = last.summary ? `${icon} ${last.name} → ${last.summary}` : `${icon} ${last.name}`;
@@ -178,6 +182,10 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
         summary: summarizeToolArguments(argumentsValue),
         state: 'running',
       };
+    },
+    /** The tools are done; the answer is being written. */
+    writing() {
+      writing = true;
     },
     /** The latest step's result, so the line stops claiming it is still running. */
     settle({ ok = true } = {}) {

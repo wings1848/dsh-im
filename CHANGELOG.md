@@ -24,9 +24,14 @@ This file records the notable changes in each dsh-im release. Its format follows
   Switching the display level no longer reconnects the bot: the new value is pushed into the running runtime and bridge, so it applies to the next turn without aborting turns in other chats.
 - 其他渠道（WhatsApp/Slack/Discord 等）不传挡位时保持原有渲染完全不变。
 
+- `/menu` 收进共享 catalog 并排在原生菜单第一位：控制台从「打字才知道的命令」变成可发现入口；`/help` 同步多一行。
+  `/menu` is now part of the shared catalog and leads the native menu, so the hub is discoverable; `/help` lists it too.
+- 全面挡位的工具结果不再另发一条消息，而是把 `· ✓ 0.8s` / `· ⚠️ 失败 0.8s` 回写到该工具自己的那一行；标准挡位在模型开始写答案时把占位行换成「✍️ 正在整理回复」。
+  In the full rung a tool result edits its own trace line (`· ✓ 0.8s` / `· ⚠️ failed 0.8s`) instead of adding a message; the standard rung switches its line to “✍️ Writing the reply” once the model starts answering.
+
 ### Tests / 测试
 
-- 全量 5084 例：5083 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
+- 全量 5085 例：5084 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
 
 
 ## [5.10.0] - 2026-11-04

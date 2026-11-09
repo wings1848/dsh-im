@@ -91,8 +91,9 @@ test('the catalog splits into sections without losing a command', () => {
   assert.equal(new Set(grouped).size, grouped.length, 'no command appears twice');
   assert.ok(grouped.length >= sections.length, 'sections actually carry commands');
   assert.ok(expected.length > 0);
-  // `menu` is helpVisible:false, so it must be in neither surface.
-  assert.ok(!grouped.includes('menu'));
+  // `/menu` became a catalog command with the hub card, so it now appears once
+  // in the help sections like any other primary command.
+  assert.equal(grouped.filter((name) => name === 'menu').length, 1);
   for (const section of sections) {
     assert.ok(section.items.length > 0, `${section.group} is never empty`);
   }

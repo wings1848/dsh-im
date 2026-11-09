@@ -1575,7 +1575,14 @@ export class TextHarnessBridge {
               if (update.type === 'reasoning') {
                 await stream.sendThinking(update.text);
               } else if (update.type === 'tool') {
-                await stream.sendToolTrace(update.name, update.arguments);
+                await stream.sendToolTrace(update.name, update.arguments, update.callId);
+              } else if (update.type === 'tool-result') {
+                // The line stays; only its ending changes, so the reader keeps
+                // one message per call and still sees the outcome.
+                await stream.settleToolTrace?.({
+                  callId: update.callId,
+                  ok: update.errorCode === undefined && update.error === undefined,
+                });
               }
               return;
             }
@@ -1595,6 +1602,13 @@ export class TextHarnessBridge {
                   ok: update.errorCode === undefined && update.error === undefined,
                 });
                 return;
+              }
+              // The answer text is not previewed on this carrier, but its arrival
+              // is the signal that the tools are done: say so instead of leaving
+              // the last tool on screen until the turn ends.
+              if (update.type === 'text' && stream.previewAnswer === false) {
+                turnProgress.writing();
+                await pushProgress(turnProgress.runningText());
               }
             }
             if (update.type === 'reasoning') return;

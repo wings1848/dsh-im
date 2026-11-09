@@ -70,6 +70,16 @@ export function commandHelpGroup(name) {
 // enabled: false removes a definition from both consumers; menuVisible: false
 // hides a command (or alias) only from the native menu, leaving help available.
 export const SHARED_COMMAND_CATALOG = Object.freeze([
+  // The hub comes first in the native menu and in `/help`: it is the shortest
+  // path to every picker this channel has.
+  defineCatalogCommand('menu', '打开控制台菜单', [
+    '/menu  打开控制台菜单（会话 / 工作区 / 模型 / 状态，一步直达）',
+  ], {
+    // The hub itself is a Telegram card (menu-card.mjs). Other channels keep the
+    // plain text answer the command has always had, so the entry stays where the
+    // card exists.
+    channels: ['telegram'],
+  }),
   defineCatalogCommand('new', '开启一个全新会话', [
     '/new  开启一个全新会话',
   ]),

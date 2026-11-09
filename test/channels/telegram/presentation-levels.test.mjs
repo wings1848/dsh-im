@@ -140,6 +140,10 @@ test('L2: standard paints one compact line and leaves a one-line receipt', async
         await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}' });
         await options.onUpdate({ type: 'tool-result', callId: 'c1', toolName: 'bash', text: 'output' });
         await options.onUpdate({ type: 'reasoning', text: 'must stay hidden' });
+        // The answer text is not previewed, but it marks the turn as "writing";
+        // wait past the edit window so the second frame is actually sent.
+        await new Promise((resolve) => setTimeout(resolve, 1_300));
+        await options.onUpdate({ type: 'text', text: 'answer draft' });
       },
     }),
     state: memoryState(),
@@ -147,8 +151,9 @@ test('L2: standard paints one compact line and leaves a one-line receipt', async
     logger: quietLogger,
   });
   await bridge.accept(message());
-  assert.equal(calls.updates.length, 1, 'one update per window, not one per event');
+  assert.equal(calls.updates.length, 2, 'one update per window, not one per event');
   assert.match(calls.updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → ls$/);
+  assert.match(calls.updates[1], /\n✍️ 正在整理回复$/u, 'the arrival of answer text switches the line');
   assert.match(calls.finish[0].progressSummary, /^✅ 完成 · \d+ 秒 · 1 步$/);
   assert.equal(calls.finish[0].format, 'markdown', 'the answer format is unchanged');
 });

@@ -743,6 +743,20 @@ export function formatToolTrace(name, argumentsValue) {
   return summary ? `🔧 ${toolName} → ${summary}` : `🔧 ${toolName}`;
 }
 
+/**
+ * Append the outcome of a tool call to its own trace line.
+ *
+ * One call = one message that ends up saying what happened and how long it took;
+ * the alternative (a second message per result) is exactly the flood the display
+ * rungs exist to avoid.
+ */
+export function formatToolOutcome(text, { ok = true, seconds = '0.0' } = {}) {
+  const base = typeof text === 'string' && text ? text : `🔧 ${t('工具')}`;
+  return ok
+    ? `${base} · ✓ ${seconds}s`
+    : `${base} · ${t('⚠️ 失败')} ${seconds}s`;
+}
+
 /** Format one reasoning line: `💭 <first paragraph>` (200-char cap). */
 export function formatThinkingLine(text) {
   const trimmed = typeof text === 'string' ? text.trim() : '';
@@ -1290,6 +1304,8 @@ export class TelegramBotClient {
     let held = null;
     let windowTimer = null;
     let windowEndsAt = 0;
+    // callId → the trace message it produced, so its result can rewrite that line.
+    const toolCalls = new Map();
     const logger = this.#logger;
     const warnFailure = (label, error) => {
       logger?.warn?.(`[dsh-im:telegram] thinking stream ${label} failed:`, error);
@@ -1303,16 +1319,17 @@ export class TelegramBotClient {
         signal: this.#signal,
       });
       const id = message?.message_id;
-      if (Number.isSafeInteger(id)) {
-        if (firstMessageId === null) firstMessageId = id;
-        providerMessageIds.push(String(id));
-      }
+      if (!Number.isSafeInteger(id)) return null;
+      if (firstMessageId === null) firstMessageId = id;
+      providerMessageIds.push(String(id));
+      return id;
     };
     const deliver = async (label, text) => {
       try {
-        await sendLine(text);
+        return await sendLine(text);
       } catch (error) {
         warnFailure(label, error);
+        return null;
       }
     };
     // Trace sends run in the background: the window timer starts one and nobody
@@ -1382,7 +1399,36 @@ export class TelegramBotClient {
       update: async () => {},
       refresh: async () => {},
       sendLine,
-      sendToolTrace: (name, argumentsValue) => emit('tool trace', formatToolTrace(name, argumentsValue)),
+      // A tool line is kept addressable by its call id: when the result arrives
+      // the same message is edited to carry the outcome and how long it took,
+      // instead of adding another line to the chat.
+      sendToolTrace: async (name, argumentsValue, callId) => {
+        const text = formatToolTrace(name, argumentsValue);
+        const startedAt = Date.now();
+        const messageId = await emit('tool trace', text);
+        if (callId !== undefined && callId !== null && Number.isSafeInteger(messageId)) {
+          toolCalls.set(String(callId), { messageId, text, startedAt });
+        }
+        return messageId;
+      },
+      settleToolTrace: async ({ callId, ok = true } = {}) => {
+        const key = callId === undefined || callId === null ? null : String(callId);
+        const call = key ? toolCalls.get(key) : null;
+        if (!call || closed) return;
+        toolCalls.delete(key);
+        const seconds = ((Date.now() - call.startedAt) / 1_000).toFixed(1);
+        const text = formatToolOutcome(call.text, { ok, seconds });
+        try {
+          await this.#api.editMessageText({
+            chatId: target.chatId,
+            messageId: call.messageId,
+            text,
+            signal: this.#signal,
+          });
+        } catch (error) {
+          warnFailure('tool outcome', error);
+        }
+      },
       sendThinking: (text) => {
         const line = formatThinkingLine(text);
         return line ? emit('thinking line', line) : Promise.resolve();
