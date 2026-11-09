@@ -1314,6 +1314,7 @@ export class TelegramBotClient {
     let windowEndsAt = 0;
     // callId → the trace message it produced, so its result can rewrite that line.
     const toolCalls = new Map();
+    let anonymousToolCalls = 0;
     const logger = this.#logger;
     const warnFailure = (label, error) => {
       logger?.warn?.(`[dsh-im:telegram] thinking stream ${label} failed:`, error);
@@ -1421,20 +1422,27 @@ export class TelegramBotClient {
       sendToolTrace: async (name, argumentsValue, callId) => {
         const startedAt = Date.now();
         const delivered = await emit('tool trace', formatToolTrace(name, argumentsValue));
-        if (callId !== undefined && callId !== null && delivered) {
-          toolCalls.set(String(callId), {
-            messageId: delivered.messageId,
-            text: delivered.text,
-            startedAt,
-          });
+        if (delivered) {
+          // Recorded even without a call id: the result may arrive unattributed,
+          // and an unrecorded line would keep claiming to be running.
+          const key = callId === undefined || callId === null
+            ? `anonymous:${++anonymousToolCalls}`
+            : String(callId);
+          toolCalls.set(key, { messageId: delivered.messageId, text: delivered.text, startedAt });
         }
         return delivered?.messageId ?? null;
       },
       settleToolTrace: async ({ callId, ok = true } = {}) => {
         const key = callId === undefined || callId === null ? null : String(callId);
-        const call = key ? toolCalls.get(key) : null;
+        // A result that cannot be attributed (the host omitted the call id) still
+        // belongs to the oldest line waiting for one: without this fallback the
+        // line would claim to be running forever.
+        const attributed = key ? [key, toolCalls.get(key)] : [null, null];
+        const [settleKey, call] = attributed[1]
+          ? attributed
+          : [...toolCalls.entries()][0] ?? [null, null];
         if (!call || closed) return;
-        toolCalls.delete(key);
+        toolCalls.delete(settleKey);
         const seconds = ((Date.now() - call.startedAt) / 1_000).toFixed(1);
         const text = formatToolOutcome(call.text, { ok, seconds });
         try {

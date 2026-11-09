@@ -1441,8 +1441,8 @@ test('Telegram bridge ignores unaddressed groups and streams direct replies', as
   // Behaviour change (5.10.1-wings.2): the default rung is `standard`, so the
   // tool update paints the compact summary line. The status/text frame keeps
   // flowing through the old path.
+  assert.equal(updates.length, 1, 'status frames do not overwrite the compact step line');
   assert.match(updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 搜索$/);
-  assert.deepEqual(updates.slice(1), ['处理中']);
   assert.deepEqual(sent, ['完成']);
   await bridge.sendConnectionTest('card test');
   assert.equal(sent.at(-1), 'card test');

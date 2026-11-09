@@ -103,4 +103,19 @@ npm run build && npm pack && node scripts/verify-package.mjs
 | 落盘 | `integrations/dsh-telegram/config.json` 出现 `presentationLevel: "minimal"`，旧的 `thinkingTraces` **已被删除** |
 | 运行时状态 | management RPC `connection.status` 返回 `state: connected`、`presentationLevel: minimal`、`thinkingTraces: false` |
 
+### 6.1 真实回合的三挡位（同一隔离实例 + 假 LLM）
+
+用本地假 OpenAI-Completions 服务（`/tmp/e2e/mock-llm.mjs`：第一轮返回 `bash echo tier-check` 工具调用，第二轮返回最终答案）让真宿主跑出**真工具调用**，再在 Telegram 侧记录插件发的每条消息：
+
+| 挡位 | 实测序列（Bot API 调用） |
+| --- | --- |
+| 极简 | `sendMessage Processing…` → `deleteMessage` → `sendRichMessage 答案` |
+| 标准 | `sendMessage Processing…` → `editMessageText ⏳ Working · 1s · 1 steps / 🔧 bash → echo tier-check` → `editMessageText ✅ Done · 1s · 1 steps` → `sendRichMessage 答案` |
+| 全面 | `sendMessage 🔧 bash → echo tier-check` → `editMessageText … · ✓ 0.3s` → `sendRichMessage 答案` |
+
+这一轮实测抓出并修掉两个只有真宿主才会暴露的问题：
+
+1. **标准挡位的过程行会被冲掉**：`status`（"正在整理结果…"）与 canonical 答案文本也会走通用进度路径，把紧凑行覆盖成一句状态、甚至把答案预演到占位里（等于答案出现两次）。现在 `standard` 只接受 tool / tool-result / text(→写回复) 三类，其余一律忽略。
+2. **全面挡位的工具行永远停在「进行中」**：真宿主对非流式回合把结果作为 `status + toolName` 帧下发，而不是 `tool-result`；现在两种都能结算该行（拿不到 callId 时按 FIFO 归属），且该帧无成功/失败信息，按「已完成」收尾（真失败会以回合错误呈现）。
+
 复现要点（踩过的坑）：假 token 必须是 `数字:35 字符`，否则连接在 `runtime.prepare` 阶段就失败；`getUpdates({offset:-1})` 是游标探测，不能回放脚本更新；`pnpm` 会按路径缓存 tarball，换包后要删 `node_modules/@xmanrui` 再 `dsh plugin install`，否则装到的还是旧构建（这坑让群命令实测一开始“失败”）。

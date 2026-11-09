@@ -1583,6 +1583,14 @@ export class TextHarnessBridge {
                   callId: update.callId,
                   ok: update.errorCode === undefined && update.error === undefined,
                 });
+              } else if (update.type === 'status' && update.toolName) {
+                // A batched turn (the host did not stream the result live) reports
+                // it as a status frame carrying the tool name. Settling the line
+                // here is what actually happens in production.
+                // This frame carries no outcome of its own — a failed tool
+                // surfaces as a turn error, not as a status frame — so the line
+                // is closed as completed.
+                await stream.settleToolTrace?.({ ok: true });
               }
               return;
             }
@@ -1603,13 +1611,16 @@ export class TextHarnessBridge {
                 });
                 return;
               }
-              // The answer text is not previewed on this carrier, but its arrival
-              // is the signal that the tools are done: say so instead of leaving
-              // the last tool on screen until the turn ends.
-              if (update.type === 'text' && stream.previewAnswer === false) {
+              // Every other update type stops here. `status` frames ("正在整理
+              // 结果…") and the canonical answer text would overwrite the step
+              // line — the reader would watch the summary vanish right before
+              // the receipt. Only the *arrival* of answer text is a signal: it
+              // means the tools are done, so the line switches to 「写回复」.
+              if (update.type === 'text') {
                 turnProgress.writing();
                 await pushProgress(turnProgress.runningText());
               }
+              return;
             }
             if (update.type === 'reasoning') return;
             // `minimal` shows nothing while the turn runs: the reader asked for

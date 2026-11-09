@@ -632,7 +632,11 @@ test('D: thinkingTraces=false keeps placeholder editing and ignores reasoning', 
   const summary = updates.find((line) => line.includes('处理中'));
   assert.ok(summary, 'the compact progress line must be edited into the placeholder');
   assert.match(summary, /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → /);
-  assert.ok(updates.includes('working…'));
+  // The reply text is never mirrored into the placeholder: its arrival only
+  // switches the compact line to 「写回复」 (or is merged away by the edit
+  // window — the writing frame itself is covered by presentation-levels L2).
+  assert.ok(!updates.includes('working…'), 'the answer must not be previewed');
+  assert.ok(!updates.some((line) => /^[^⏳].*working/u.test(line ?? '')));
   assert.ok(!updates.includes('hidden reasoning'));
   assert.equal(lines[lines.length - 1], 'Final answer');
 });

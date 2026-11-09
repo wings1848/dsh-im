@@ -18,6 +18,7 @@ const CHAT_ID = 42;
  */
 async function runTurn(t, {
   presentationLevel, legacyThinkingTraces, numbering = false, intervalSeconds = 0,
+  dropCallId = false, batchedResult = false,
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), `dsh-im-level-${presentationLevel ?? 'legacy'}-`));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -88,8 +89,12 @@ async function runTurn(t, {
       createSession: async () => 'session-levels',
       ask: async (_sessionId, _text, options) => {
         await options.onUpdate({ type: 'reasoning', step: 0, text: 'Let me check the directory.' });
-        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}', callId: 'c1' });
-        await options.onUpdate({ type: 'tool-result', callId: 'c1', toolName: 'bash', text: 'a b c' });
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}', ...(dropCallId ? {} : { callId: 'c1' }) });
+        if (batchedResult) {
+          await options.onUpdate({ type: 'status', toolName: 'bash', text: '正在整理结果…' });
+        } else {
+          await options.onUpdate({ type: 'tool-result', ...(dropCallId ? {} : { callId: 'c1' }), toolName: 'bash', text: 'a b c' });
+        }
         await options.onUpdate({ type: 'text', text: 'Writing the answer…' });
         return '**final answer**';
       },
@@ -161,4 +166,20 @@ test('runtime/full with numbering: the outcome keeps the frame number', async (t
   const edited = /^(\d+) 🔧 bash → ls · ✓ \d+\.\ds$/u.exec(calls[2].text);
   assert.ok(edited, `the settled line keeps a frame number, got ${calls[2].text}`);
   assert.equal(edited[1], sent[1], 'the number is the same before and after the edit');
+});
+
+test('runtime/full: a result without a call id still settles the waiting line', async (t) => {
+  // The host does not always echo the call id on the result event; the oldest
+  // unsettled line is then the one it belongs to (FIFO).
+  const calls = await runTurn(t, { presentationLevel: 'full', dropCallId: true });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
+  assert.match(calls[2].text, /· ✓ \d+\.\ds$/u);
+});
+
+test('runtime/full: a batched turn settles the line from the status frame', async (t) => {
+  // A host that does not stream the result live reports it as
+  // `status + toolName`; the trace line must still end with its outcome.
+  const calls = await runTurn(t, { presentationLevel: 'full', batchedResult: true });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
+  assert.match(calls[2].text, /· ✓ \d+\.\ds$/u);
 });
