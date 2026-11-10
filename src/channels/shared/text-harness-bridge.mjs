@@ -833,8 +833,16 @@ export class TextHarnessBridge {
     this.#stopTokens.delete(token);
     await allow(t('已请求停止。'));
     try {
-      const result = await this.#runMenuEntry('/stop', key);
-      if (result && !result.handled) await this.#bot.sendText(callback?.replyTarget ?? {}, t('已请求停止。'));
+      // Same options the typed `/stop` uses: without `control` the harness cannot
+      // tell which turn to cancel, and the request silently does nothing.
+      // The press is already acknowledged; the turn's own ending ("已停止。") is
+      // the only extra message the reader needs — a second notice here would be
+      // the same sentence twice.
+      await runControlCommand('/stop', this.#harness, this.#state, key, {
+        signal: this.#signal,
+        control: { owner: this, key },
+        deferredDelivery: this.#deferred,
+      });
     } catch (error) {
       this.#logger.warn?.(
         `[dsh-im:${this.#descriptor.key}] the ⏹ button could not stop the turn:`,

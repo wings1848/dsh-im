@@ -141,8 +141,9 @@ Telegram 新用户点 Start 会发 `/start`；以前这条会被当普通文本�
 | 观察点 | 实测 |
 | --- | --- |
 | 占位 | `sendMessage Processing… hasKeyboard=true`，按钮 `⏹ Stop` |
-| 按下 | 回调 ack「Stop requested.」；正在跑的工具（`sleep 40`）被中断 |
-| 收尾 | 回执 `⚠️ Done · 1s · 1 steps · 1 failed` 且 **清掉键盘**（`clearedKeyboard=true`） |
+| 按下 | 回调 ack「Stop requested.」；带 `control:{owner,key}` 调 `/stop`，宿主取消该回合，`sleep 40` 立即结束 |
+| 收尾 | 占位消息被删除（连按钮一起消失），随后一条「Stopped.」；**不会**多出一条重复提示 |
+| 已修的坑 | 早先按钮走 `#runMenuEntry('/stop')`，没带 `control`，宿主不知道要取消哪个回合 → 按钮只 ack、任务照跑 40 秒；现在直接带 `control` 调 `runControlCommand` |
 | 边界 | token 与「是谁发起的这一回合」绑定：群里其他人按只会收到「只有发起这个任务的人可以停止它」；过期 token 回「需要停止请发送 /stop」 |
 
 已知取舍：全面挡位没有占位消息，所以没有按钮（那一档的用户直接发 `/stop`）；被停止的回合回执沿用「完成/失败」措辞而不是「已停止」。
