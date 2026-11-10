@@ -709,3 +709,73 @@ test('L19: a failed step turns the closing receipt into a warning', async () => 
   assert.match(calls.updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → false$/u);
   assert.match(calls.finish[0].progressSummary, /^⚠️ 完成 · \d+ 秒 · 1 步 · 1 步失败$/u);
 });
+
+test('L20: /display in a group answers into the same group chat', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cards = [];
+  const bot = {
+    async sendText() {},
+    async sendTyping() {},
+    async sendInteractionCard(target, card) {
+      cards.push({ target, card });
+      return { providerMessageIds: ['901'] };
+    },
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    harness: { ensureRunning: async () => true },
+    presentationLevel: 'standard',
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: 'g1', senderId: '77', kind: 'group', conversationId: '-1001',
+    content: '/display', addressed: true,
+    replyTarget: { chatId: -1001, chatType: 'supergroup', messageThreadId: 5 },
+  });
+  assert.equal(cards.length, 1, 'the picker goes to the group, not a private chat');
+  assert.equal(cards[0].target.chatId, -1001);
+  assert.equal(cards[0].target.messageThreadId, 5);
+  assert.match(cards[0].card.text, /🎛 显示挡位/u);
+});
+
+test('L21: refreshing the /status card keeps the display line', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cards = [];
+  const edits = [];
+  const bot = {
+    async sendText() {},
+    async sendTyping() {},
+    async sendInteractionCard(_target, card) { cards.push(card); return { providerMessageIds: ['411'] }; },
+    async editInteractionCard(_target, messageId, card) { edits.push(card); return {}; },
+    async answerInteractionCallback() {},
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    harness: {
+      ensureRunning: async () => true,
+      currentWorkspace: () => '/home/wings/e2e',
+      currentConversationWorkspace: () => '/home/wings/e2e',
+      status: async () => ({ connected: true }),
+      hostDescribe: async () => ({ version: '0.2.2' }),
+    },
+    presentationLevel: 'minimal',
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: '1', senderId: '42', kind: 'direct', conversationId: '42',
+    content: '/status', addressed: true, replyTarget: { chatId: 42 },
+  });
+  const refresh = cards[0].markup.inline_keyboard.flat()
+    .find((button) => /刷新|Refresh/u.test(button.text));
+  assert.ok(refresh, 'the card has a refresh button');
+  await bridge.acceptCallback({
+    conversationId: '42', senderId: '42', messageId: '411', kind: 'direct',
+    data: refresh.callback_data, replyTarget: { chatId: 42 },
+  });
+  assert.equal(edits.length, 1, 'the card repainted in place');
+  assert.match(edits[0].text, /显示挡位：极简/u, 'the refreshed card still shows the level');
+});

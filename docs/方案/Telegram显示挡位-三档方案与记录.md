@@ -86,6 +86,7 @@ npm run build && npm pack && node scripts/verify-package.mjs
 
 ## 5. 未完成（下一轮）
 
+0. **已装到 wings-gpd**（2026-11-10 08:11，重启后 `wings_gpd_dsh_bot` connected、`presentationLevel=standard`），用户可直接在 TG 里发 `/display` 体验；tx-us1 与 Windows 仍是 wings.1。
 1. **真机截图**：wings-gpd 的图形会话从 01:22 起一直锁屏（`loginctl` `LockedHint=yes`），没法用 computer-use 操作 Telegram 客户端；需要用户解锁（自动跑完整条验收流水线）或直接授权装到设备上。
 2. ~~真实模型回合的三挡位渲染~~：已用本地假 LLM 在真宿主跑通（§6.1），含失败工具的分支。
 3. ~~`/status` 增加「当前挡位」一行~~：已做（§6.2）。
