@@ -232,4 +232,12 @@ export default {
 
   '⚠️ 完成 · {seconds} 秒 · {steps} 步 · {failed} 步失败': '⚠️ Done · {seconds}s · {steps} steps · {failed} failed',
 
+  // /start 欢迎卡（5.10.1-wings.2）
+  '已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。': 'Connected to DeepSeek Harness. Just send a message; /help lists every command.',
+  '👋 你好，{label} 已连接 DeepSeek Harness。': '👋 Hi — {label} is connected to DeepSeek Harness.',
+  '直接发消息（文字、图片、文件）就能开始，过程和答案都在这条对话里。': 'Send anything — text, a picture or a file — and the work happens right here in this chat.',
+  '当前过程显示：{level}（可随时切换，不会刷屏）。': 'Current detail: {level}. You can change it any time; it never floods the chat.',
+  '想看全部命令就点「菜单」，想调过程显示就点「显示挡位」。': 'Tap Menu for every command, or Display to change how much of a turn you see.',
+  '已打开。': 'Opened.',
+
 };

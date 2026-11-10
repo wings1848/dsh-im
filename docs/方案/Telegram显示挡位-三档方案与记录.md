@@ -124,6 +124,16 @@ npm run build && npm pack && node scripts/verify-package.mjs
 2. **全面挡位的工具行永远停在「进行中」**：Telegram 走 `progressMode:'all'`，tracker 的 `live` 永远为假，所以生产里**根本不会出现 `tool-result` 帧**——工具结果只以 `status + toolName(+error)` 下发。现在两种形态都能结算该行：带 callId 按 id 归属，没给 id 才按 FIFO 兜底；**给了 id 但查不到就什么也不做**（否则会误结算别人还在跑的行）。
 3. **失败的工具行曾被渲染成 ✓**（独立评审发现）：status 帧其实带着 `error`，早先却硬编码 `ok:true`。现在按 `error` 判定，并把这个字段（连同 callId）补进投影帧；`standard` 的收尾回执遇到失败步数会变成 `⚠️ 完成 · 12 秒 · 5 步 · 1 步失败`，不再一律 ✅。真宿主实测：`🔧 bash → false · ⚠️ failed 0.0s` / `⚠️ Done · 1s · 1 steps · 1 failed`。
 
+### 6.1.1 `/start` 欢迎卡（真宿主，2026-11-10）
+
+Telegram 新用户点 Start 会发 `/start`；以前这条会被当普通文本丢给模型（模型去解释一串 `/start`）。现在：
+
+| 观察点 | 实测 |
+| --- | --- |
+| `/start` | 发欢迎卡：「已连接 DeepSeek Harness…当前过程显示：标准」+ 三个按钮 `🏠 Menu` / `🎛 Display` / `❓ Help` |
+| 按下「Display」 | 直接打开三挡位选择器，回调 ack「Opened.」 |
+| 副作用 | `/start` 不再进入模型回合（用例断言 `ask` 调用数为 0） |
+
 ### 6.2 /status 卡片与选择器入口（真宿主）
 
 同一隔离环境里脚本化「先 `/status`、再按下卡片上的显示挡位按钮」：

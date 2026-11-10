@@ -7,6 +7,7 @@ import { TelegramModelCard } from './model-card.mjs';
 import { TelegramPresetCard } from './preset-card.mjs';
 import { TelegramClearCard } from './clear-card.mjs';
 import { TelegramDisplayCard } from './display-card.mjs';
+import { TelegramWelcomeCard } from './welcome-card.mjs';
 import { TelegramMenuCard } from './menu-card.mjs';
 import { TelegramHelpCard } from './help-card.mjs';
 import { TelegramStatusCard } from './status-card.mjs';
@@ -174,6 +175,11 @@ export class TelegramHarnessBridge extends TextHarnessBridge {
       helpCard: options && Object.hasOwn(options, 'helpCard')
         ? options.helpCard
         : new TelegramHelpCard({ logger: options?.logger }),
+      // `/start` greeting: a launcher for the console. `welcomeCard: null` keeps
+      // the one-line text answer.
+      welcomeCard: options && Object.hasOwn(options, 'welcomeCard')
+        ? options.welcomeCard
+        : new TelegramWelcomeCard({ logger: options?.logger }),
       // /display picker: three rungs, one tap. `displayCard: null` keeps the
       // text answer for tests/tools or a channel without a keyboard.
       displayCard: options && Object.hasOwn(options, 'displayCard')

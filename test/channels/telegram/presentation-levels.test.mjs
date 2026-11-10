@@ -779,3 +779,34 @@ test('L21: refreshing the /status card keeps the display line', async (t) => {
   assert.equal(edits.length, 1, 'the card repainted in place');
   assert.match(edits[0].text, /显示挡位：极简/u, 'the refreshed card still shows the level');
 });
+
+test('L22: /start greets with the launcher card instead of prompting the model', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cards = [];
+  let prompted = 0;
+  const bot = {
+    async sendText() {},
+    async sendTyping() {},
+    async sendInteractionCard(_target, card) { cards.push(card); return { providerMessageIds: ['611'] }; },
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    harness: {
+      ensureRunning: async () => true,
+      createSession: async () => 's',
+      ask: async () => { prompted += 1; return 'should not happen'; },
+    },
+    presentationLevel: 'standard',
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: 's1', senderId: '42', kind: 'direct', conversationId: '42',
+    content: '/start', addressed: true, replyTarget: { chatId: 42 },
+  });
+  assert.equal(prompted, 0, '/start must never reach the model');
+  assert.equal(cards.length, 1, 'the greeting card was sent');
+  assert.match(cards[0].text, /已连接 DeepSeek Harness/u);
+  assert.match(cards[0].text, /当前过程显示：标准/u);
+});

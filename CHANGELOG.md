@@ -32,6 +32,9 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 群聊里发送共享本地命令（`/status`、`/menu`、`/display` 等）现在一律算「已点名」：命令菜单在群组里点下去真的会有反应，不再被「仅 @ 时回复」规则静默丢弃；普通文字与未知 slash 命令仍按原规则处理。
   Shared local commands (`/status`, `/menu`, `/display`, …) now count as addressed in groups, so tapping the group command menu actually works instead of being silently dropped by the mention-only rule; ordinary text and unknown slash text keep the old rule.
 
+- 新增 `/start` 欢迎卡：Telegram 新用户点 Start 时不再把这串命令丢给模型，而是收到一张三入口卡片（菜单 / 显示挡位 / 帮助），按下即 replay 对应命令；`/start` 在所有渠道都按本地命令处理。
+  Added a `/start` greeting: Telegram's first-contact command is answered with a three-entry card (menu / display / help) instead of being sent to the model; `/start` counts as a local command on every channel.
+
 ### Tests / 测试
 
 - 全量 5088 例：5087 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。

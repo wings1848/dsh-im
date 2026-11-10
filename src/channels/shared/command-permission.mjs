@@ -9,6 +9,13 @@ import { isPresetCommand } from './preset-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
 const SIMPLE_TEXT_COMMANDS = new Set(['/help', '/status', '/new']);
+const START_COMMAND = /^\/start(?=$|\s)/iu;
+
+/** Telegram's first-contact command; answered locally by every channel. */
+export function isStartCommand(text) {
+  if (typeof text !== 'string') return false;
+  return START_COMMAND.test(text.trim());
+}
 
 /**
  * Match only commands that the shared bridges already execute locally.
@@ -33,6 +40,7 @@ export function isSharedLocalCommand(text, {
     || /^\/display(?=$|\s)/iu.test(command)
   )) return true;
   if (hasImages || hasFiles) return false;
+  if (isStartCommand(command)) return true;
   return SIMPLE_TEXT_COMMANDS.has(command.toLowerCase())
     || isWorkspaceCommand(command)
     || isCompactCommand(command);

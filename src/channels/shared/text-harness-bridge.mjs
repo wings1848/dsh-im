@@ -211,6 +211,13 @@ function isBareCommand(command, name) {
   return command === name || command.startsWith(`${name} `) || command.startsWith(`${name}\t`);
 }
 
+/** Telegram's first-contact command: answered locally, never forwarded. */
+const START_COMMAND_PATTERN = /^\/start(?=$|\s)/iu;
+
+function isStartText(text) {
+  return typeof text === 'string' && START_COMMAND_PATTERN.test(text.trim());
+}
+
 /** True when a bare command carries words after it. */
 function hasExtraArguments(command, name) {
   return command.slice(name.length).trim().length > 0;
@@ -263,6 +270,8 @@ export class TextHarnessBridge {
   #convCard;
   // Three-way display picker for `/display`; null keeps the text answer.
   #displayCard;
+  // Telegram's `/start` greeting; null keeps the plain text answer.
+  #welcomeCard;
   // Persists a new display level (a bot-config write owned by the channel).
   #onPresentationLevelChange;
   #contextHooks = null;
@@ -307,6 +316,7 @@ export class TextHarnessBridge {
     statusCard = null,
     convCard = null,
     displayCard = null,
+    welcomeCard = null,
     onPresentationLevelChange = null,
     approvalTimeoutMs,
     contextHooks = null,
@@ -347,6 +357,7 @@ export class TextHarnessBridge {
     this.#statusCard = statusCard ?? null;
     this.#convCard = convCard ?? null;
     this.#displayCard = displayCard ?? null;
+    this.#welcomeCard = welcomeCard ?? null;
     this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
       ? onPresentationLevelChange
       : null;
@@ -1293,6 +1304,14 @@ export class TextHarnessBridge {
         await this.#bot.sendText(target, status.message);
         return;
       }
+      // `/start` is the first thing Telegram sends a new reader; answer it with
+      // a greeting instead of forwarding the literal string to the model.
+      if (!hasImages && !hasFiles && isStartText(text)
+        && (message.kind === 'direct' || message.addressed === true)) {
+        if (await this.#presentWelcomeCard(target, conversationKey)) return;
+        await this.#bot.sendText(target, t('已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。'));
+        return;
+      }
       // `/display` is the one place a reader tunes how much of a turn the chat
       // shows. A keyboard channel gets three buttons; every other channel gets
       // the same three names as text, so the setting exists everywhere.
@@ -2219,6 +2238,23 @@ export class TextHarnessBridge {
       }).catch((error) => {
         this.#logger.error?.(
           `[dsh-im:${this.#descriptor.key}] failed to handle a /conv press:`,
+          error,
+        );
+        return false;
+      });
+      if (handled) return;
+    }
+    // The /start greeting is a launcher: a press replays the command it names and
+    // leaves the card in place.
+    if (this.#welcomeCard && typeof this.#welcomeCard.handlePress === 'function') {
+      const handled = await this.#welcomeCard.handlePress(callback, {
+        bot: this.#bot,
+        answer: (text) => this.#answerInteractionCallback(callback, text),
+        conversationKey: key,
+        run: (command) => this.#runStatusCardEntry(command, key, callback),
+      }).catch((error) => {
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to handle a /start press:`,
           error,
         );
         return false;
@@ -3332,6 +3368,31 @@ export class TextHarnessBridge {
     return result;
   }
 
+
+  /**
+   * Send the `/start` greeting. Returns false when the channel has no keyboard
+   * (the caller then answers with one sentence of text).
+   */
+  async #presentWelcomeCard(target, conversationKey) {
+    if (!this.#welcomeCard || typeof this.#welcomeCard.present !== 'function') return false;
+    if (typeof this.#bot?.sendInteractionCard !== 'function') return false;
+    try {
+      return await this.#welcomeCard.present({
+        bot: this.#bot,
+        target,
+        conversationKey,
+        levelLabel: this.#presentationLevel
+          ? presentationLevelLabel(this.#presentationLevel)
+          : null,
+      });
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not present the /start greeting:`,
+        error?.message ?? error,
+      );
+      return false;
+    }
+  }
 
   /**
    * Replay one `/status` card entry.
