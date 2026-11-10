@@ -1585,14 +1585,15 @@ export class TextHarnessBridge {
                   callId: update.callId,
                   ok: update.errorCode === undefined && update.error === undefined,
                 });
-              } else if (update.type === 'status' && update.toolName) {
+              } else if (update.type === 'status' && (update.toolName || update.callId)) {
                 // A batched turn (the host did not stream the result live) reports
-                // it as a status frame carrying the tool name. Settling the line
-                // here is what actually happens in production.
-                // This frame carries no outcome of its own — a failed tool
-                // surfaces as a turn error, not as a status frame — so the line
-                // is closed as completed.
-                await stream.settleToolTrace?.({ ok: true });
+                // it as a status frame carrying the tool name and, when the tool
+                // failed, its error text. Same rule as the live branch: an absent
+                // error means success.
+                await stream.settleToolTrace?.({
+                  callId: update.callId,
+                  ok: update.error === undefined,
+                });
               }
               return;
             }
@@ -1611,6 +1612,13 @@ export class TextHarnessBridge {
                 turnProgress.settle({
                   ok: update.errorCode === undefined && update.error === undefined,
                 });
+                return;
+              }
+              // A batched result (the shape Telegram actually gets) marks the step
+              // failed, so the closing receipt cannot claim a clean run.
+              if (update.type === 'status' && (update.toolName || update.callId)) {
+                turnProgress.settle({ ok: update.error === undefined });
+                await pushProgress(turnProgress.runningText());
                 return;
               }
               // Every other update type stops here. `status` frames ("正在整理

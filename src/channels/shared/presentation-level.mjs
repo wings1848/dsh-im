@@ -141,6 +141,7 @@ export function summarizeToolArguments(value, { limit = TOOL_SUMMARY_LIMIT } = {
 export function createTurnProgress({ now = Date.now, startedAt } = {}) {
   const start = Number.isFinite(startedAt) ? startedAt : now();
   let steps = 0;
+  let failures = 0;
   let last = null;
   // Set once the model stops calling tools and starts writing its answer: the
   // reader then sees the turn is finishing instead of a frozen last tool.
@@ -151,6 +152,13 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
   const compose = (phase) => {
     const elapsed = seconds();
     if (phase === 'done') {
+      if (failures > 0 && steps > 0) {
+        // A failed step must not be rounded up to a plain ✅: the receipt is the
+        // only trace a `standard` reader keeps.
+        return t('⚠️ 完成 · {seconds} 秒 · {steps} 步 · {failed} 步失败', {
+          seconds: elapsed, steps, failed: failures,
+        });
+      }
       return steps > 0
         ? t('✅ 完成 · {seconds} 秒 · {steps} 步', { seconds: elapsed, steps })
         : t('✅ 完成 · {seconds} 秒', { seconds: elapsed });
@@ -190,9 +198,13 @@ export function createTurnProgress({ now = Date.now, startedAt } = {}) {
     /** The latest step's result, so the line stops claiming it is still running. */
     settle({ ok = true } = {}) {
       if (last) last.state = ok ? 'ok' : 'error';
+      if (!ok) failures += 1;
     },
     get steps() {
       return steps;
+    },
+    get failures() {
+      return failures;
     },
     /** The line for a turn that is still running. */
     runningText() {

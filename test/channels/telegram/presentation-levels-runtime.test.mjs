@@ -18,7 +18,8 @@ const CHAT_ID = 42;
  */
 async function runTurn(t, {
   presentationLevel, legacyThinkingTraces, numbering = false, intervalSeconds = 0,
-  dropCallId = false, batchedResult = false,
+  dropCallId = false, batchedResult = false, toolFailed = false,
+  twoTools = false, unknownCallFirst = false,
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), `dsh-im-level-${presentationLevel ?? 'legacy'}-`));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -90,8 +91,25 @@ async function runTurn(t, {
       ask: async (_sessionId, _text, options) => {
         await options.onUpdate({ type: 'reasoning', step: 0, text: 'Let me check the directory.' });
         await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"ls"}', ...(dropCallId ? {} : { callId: 'c1' }) });
+        if (twoTools) {
+          await options.onUpdate({ type: 'tool', name: 'grep', arguments: '{"pattern":"x"}', callId: 'c2' });
+        }
+        if (unknownCallFirst) {
+          // A result naming a call we never recorded must not close anyone else's
+          // line: the frame may have been merged away, and that tool still runs.
+          await options.onUpdate({ type: 'status', toolName: 'bash', callId: 'zzz', text: '正在整理结果…' });
+        }
         if (batchedResult) {
-          await options.onUpdate({ type: 'status', toolName: 'bash', text: '正在整理结果…' });
+          // The shape Telegram actually receives: `progressMode: 'all'` means the
+          // tracker is never "live", so results arrive as a status frame carrying
+          // the tool name, its call id and (on failure) the error text.
+          await options.onUpdate({
+            type: 'status',
+            toolName: 'bash',
+            ...(dropCallId ? {} : { callId: 'c1' }),
+            ...(toolFailed ? { error: 'exit code 1' } : {}),
+            text: '正在整理结果…',
+          });
         } else {
           await options.onUpdate({ type: 'tool-result', ...(dropCallId ? {} : { callId: 'c1' }), toolName: 'bash', text: 'a b c' });
         }
@@ -177,9 +195,25 @@ test('runtime/full: a result without a call id still settles the waiting line', 
 });
 
 test('runtime/full: a batched turn settles the line from the status frame', async (t) => {
-  // A host that does not stream the result live reports it as
-  // `status + toolName`; the trace line must still end with its outcome.
+  // Telegram never gets a live `tool-result`; the result is a status frame.
   const calls = await runTurn(t, { presentationLevel: 'full', batchedResult: true });
   assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
   assert.match(calls[2].text, /· ✓ \d+\.\ds$/u);
+});
+
+test('runtime/full: a FAILED batched tool settles as a failure, not a tick', async (t) => {
+  const calls = await runTurn(t, { presentationLevel: 'full', batchedResult: true, toolFailed: true });
+  assert.deepEqual(calls.map((call) => call.method), ['send', 'send', 'edit', 'rich']);
+  assert.match(calls[2].text, /· ⚠️ 失败 \d+\.\ds$/u);
+  assert.doesNotMatch(calls[2].text, /✓/u);
+});
+
+test('runtime/full: an unknown call id settles nothing', async (t) => {
+  const calls = await runTurn(t, {
+    presentationLevel: 'full', twoTools: true, unknownCallFirst: true, batchedResult: true,
+  });
+  const edits = calls.filter((call) => call.method === 'edit');
+  assert.equal(edits.length, 1, 'only the tool whose id matched was settled');
+  assert.match(edits[0].text, /bash → ls · ✓/u);
+  assert.ok(!edits.some((edit) => /grep/u.test(edit.text)), 'the other line must stay untouched');
 });

@@ -87,8 +87,8 @@ npm run build && npm pack && node scripts/verify-package.mjs
 ## 5. 未完成（下一轮）
 
 1. **真机截图**：wings-gpd 的图形会话从 01:22 起一直锁屏（`loginctl` `LockedHint=yes`），没法用 computer-use 操作 Telegram 客户端；需要用户解锁（自动跑完整条验收流水线）或直接授权装到设备上。
-2. **真实模型回合的三挡位渲染**：宿主级实测已覆盖命令/卡片/落盘/群命令，但「一条真回合里三挡位各发哪些消息」还需要一次真模型调用（本地假 API 可用，模型 key 是否动用待用户确认）。运行时级用例已按假 API 钉住调用序列。
-3. `/status` 增加「当前挡位」一行（现在只有设置页、`/display` 与 RPC 能看到）。
+2. ~~真实模型回合的三挡位渲染~~：已用本地假 LLM 在真宿主跑通（§6.1），含失败工具的分支。
+3. ~~`/status` 增加「当前挡位」一行~~：已做（§6.2）。
 
 ## 6. 宿主级端到端实测（2026-11-10，无需 Telegram 账号）
 
@@ -116,7 +116,8 @@ npm run build && npm pack && node scripts/verify-package.mjs
 这一轮实测抓出并修掉两个只有真宿主才会暴露的问题：
 
 1. **标准挡位的过程行会被冲掉**：`status`（"正在整理结果…"）与 canonical 答案文本也会走通用进度路径，把紧凑行覆盖成一句状态、甚至把答案预演到占位里（等于答案出现两次）。现在 `standard` 只接受 tool / tool-result / text(→写回复) 三类，其余一律忽略。
-2. **全面挡位的工具行永远停在「进行中」**：真宿主对非流式回合把结果作为 `status + toolName` 帧下发，而不是 `tool-result`；现在两种都能结算该行（拿不到 callId 时按 FIFO 归属），且该帧无成功/失败信息，按「已完成」收尾（真失败会以回合错误呈现）。
+2. **全面挡位的工具行永远停在「进行中」**：Telegram 走 `progressMode:'all'`，tracker 的 `live` 永远为假，所以生产里**根本不会出现 `tool-result` 帧**——工具结果只以 `status + toolName(+error)` 下发。现在两种形态都能结算该行：带 callId 按 id 归属，没给 id 才按 FIFO 兜底；**给了 id 但查不到就什么也不做**（否则会误结算别人还在跑的行）。
+3. **失败的工具行曾被渲染成 ✓**（独立评审发现）：status 帧其实带着 `error`，早先却硬编码 `ok:true`。现在按 `error` 判定，并把这个字段（连同 callId）补进投影帧；`standard` 的收尾回执遇到失败步数会变成 `⚠️ 完成 · 12 秒 · 5 步 · 1 步失败`，不再一律 ✅。真宿主实测：`🔧 bash → false · ⚠️ failed 0.0s` / `⚠️ Done · 1s · 1 steps · 1 failed`。
 
 ### 6.2 /status 卡片与选择器入口（真宿主）
 

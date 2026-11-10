@@ -95,7 +95,9 @@ test('P6: the compact line counts steps and carries elapsed time', () => {
     '⏳ 处理中 · 12 秒 · 2 步\n⚠️ edit',
     'a failed latest step is marked, and a tool without arguments adds no arrow',
   );
-  assert.equal(progress.doneText(), '✅ 完成 · 12 秒 · 2 步');
+  // One step failed, so the receipt cannot claim a clean run.
+  assert.equal(progress.doneText(), '⚠️ 完成 · 12 秒 · 2 步 · 1 步失败');
+  assert.equal(progress.failures, 1);
   assert.equal(progress.steps, 2);
 });
 

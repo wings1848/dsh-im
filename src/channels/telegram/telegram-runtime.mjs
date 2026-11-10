@@ -1434,13 +1434,15 @@ export class TelegramBotClient {
       },
       settleToolTrace: async ({ callId, ok = true } = {}) => {
         const key = callId === undefined || callId === null ? null : String(callId);
-        // A result that cannot be attributed (the host omitted the call id) still
-        // belongs to the oldest line waiting for one: without this fallback the
-        // line would claim to be running forever.
-        const attributed = key ? [key, toolCalls.get(key)] : [null, null];
-        const [settleKey, call] = attributed[1]
-          ? attributed
-          : [...toolCalls.entries()][0] ?? [null, null];
+        // A result *without* an id can only be attributed by order: the oldest
+        // line still waiting is the one it belongs to. A result that names an id
+        // we never recorded is dropped instead — guessing there would close
+        // somebody else's line (the frame may have been merged away by the edit
+        // window, and the tool it belongs to is still running).
+        if (key && !toolCalls.has(key)) return;
+        const [settleKey, call] = key
+          ? [key, toolCalls.get(key)]
+          : (toolCalls.size > 0 ? [...toolCalls.entries()][0] : [null, null]);
         if (!call || closed) return;
         toolCalls.delete(settleKey);
         const seconds = ((Date.now() - call.startedAt) / 1_000).toFixed(1);

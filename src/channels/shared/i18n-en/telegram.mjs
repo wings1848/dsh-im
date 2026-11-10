@@ -229,6 +229,7 @@ export default {
   '⚠️ 失败': '⚠️ failed',
 
   '显示挡位：{level}': 'Display: {level}',
-  '🎛 显示挡位': '🎛 Display',
+
+  '⚠️ 完成 · {seconds} 秒 · {steps} 步 · {failed} 步失败': '⚠️ Done · {seconds}s · {steps} steps · {failed} failed',
 
 };

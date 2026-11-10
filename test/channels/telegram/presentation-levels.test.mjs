@@ -687,3 +687,25 @@ test('L18: the /status card carries the current rung and a picker entry', async 
   assert.match(cards[1].text, /🎛 显示挡位/u);
   assert.ok(!notices.some((text) => /无法打开/u.test(text ?? '')), notices.join('|'));
 });
+
+test('L19: a failed step turns the closing receipt into a warning', async () => {
+  const { stream, calls } = streamFixture();
+  const { bot } = botFixture({ stream });
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    harness: harnessFixture({
+      onAsk: async (options) => {
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"false"}', callId: 'c1' });
+        // The shape production sends for a failed tool.
+        await options.onUpdate({ type: 'status', toolName: 'bash', callId: 'c1', error: 'exit code 1', text: '正在整理结果…' });
+        await options.onUpdate({ type: 'text', text: 'the answer' });
+      },
+    }),
+    state: memoryState(),
+    presentationLevel: 'standard',
+    logger: quietLogger,
+  });
+  await bridge.accept(message());
+  assert.match(calls.updates[0], /^⏳ 处理中 · \d+ 秒 · 1 步\n🔧 bash → false$/u);
+  assert.match(calls.finish[0].progressSummary, /^⚠️ 完成 · \d+ 秒 · 1 步 · 1 步失败$/u);
+});
