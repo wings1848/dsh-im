@@ -148,6 +148,19 @@ Telegram 新用户点 Start 会发 `/start`；以前这条会被当普通文本�
 
 已知取舍：全面挡位没有占位消息，所以没有按钮（那一档的用户直接发 `/stop`）；被停止的回合回执沿用「完成/失败」措辞而不是「已停止」。
 
+### 6.1.3 回归矩阵（一条命令，6 例）
+
+`skills/dsh-plugin-development/scripts/check-matrix.sh` 在宿主级一次跑完：
+
+| 用例 | 结果 |
+| --- | --- |
+| `turn / minimal` | PASS：占位（带 ⏹）→ 删除 → 答案，无进度编辑 |
+| `turn / standard` | PASS：占位 → `⏳ Working` → `✅ Done`（清键盘）→ 答案 |
+| `turn / full` | PASS：`🔧` 行 → `· ✓ 0.0s` → 答案 |
+| `stop / minimal` | PASS：ack → 占位（连按钮）删除 → 「Stopped.」 |
+| `start / standard` | PASS：欢迎卡 + 三入口 |
+| `status / standard` | PASS：状态卡（含挡位）→ 按下 → 选择器 + ack |
+
 ### 6.2 /status 卡片与选择器入口（真宿主）
 
 同一隔离环境里脚本化「先 `/status`、再按下卡片上的显示挡位按钮」：
