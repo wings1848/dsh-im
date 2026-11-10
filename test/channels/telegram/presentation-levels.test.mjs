@@ -810,3 +810,57 @@ test('L22: /start greets with the launcher card instead of prompting the model',
   assert.match(cards[0].text, /已连接 DeepSeek Harness/u);
   assert.match(cards[0].text, /当前过程显示：标准/u);
 });
+
+test('L23: a running turn carries a ⏹ button, and only its sender can press it', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const sent = [];
+  const acks = [];
+  const { stream } = streamFixture();
+  const bot = {
+    async sendText(_target, text) { sent.push(text); },
+    async sendTyping() {},
+    async sendInteractionCard() { return { providerMessageIds: ['1'] }; },
+    async answerInteractionCallback(_id, text) { acks.push(text); },
+    async openDeliveryStream(target) {
+      stopToken = target.stopToken ?? null;
+      sent.push(`placeholder:${stopToken ? 'stop' : 'plain'}`);
+      return stream;
+    },
+  };
+  let release = () => {};
+  let stopToken = null;
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: memoryState(),
+    presentationLevel: 'standard',
+    logger: quietLogger,
+    harness: harnessFixture({
+      onAsk: async (options) => {
+        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"sleep 60"}' });
+        await new Promise((resolve) => { release = resolve; });
+      },
+    }),
+  });
+  const turn = bridge.accept(message({ messageId: 'm-stop', content: 'run a long task' }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(sent.some((line) => line === 'placeholder:stop'), 'the placeholder asks for the button');
+
+  assert.ok(stopToken, 'a stop token was issued for the turn');
+
+  // A stranger tapping it changes nothing.
+  await bridge.acceptCallback({
+    conversationId: 'u1', senderId: 'other', messageId: '1', kind: 'direct',
+    data: `st|${stopToken}`, replyTarget: { chatId: 42 },
+  });
+  assert.match(acks.at(-1) ?? '', /只有发起/u);
+
+  // The sender's press stops the turn.
+  await bridge.acceptCallback({
+    conversationId: 'u1', senderId: 'u1', messageId: '1', kind: 'direct',
+    data: `st|${stopToken}`, replyTarget: { chatId: 42 },
+  });
+  assert.match(acks.at(-1) ?? '', /已请求停止/u);
+  release();
+  await turn.catch(() => {});
+});

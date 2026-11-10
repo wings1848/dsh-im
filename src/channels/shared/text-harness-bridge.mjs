@@ -282,6 +282,8 @@ export class TextHarnessBridge {
   // Who opened the in-flight turn per conversation key, for the same-sender
   // auto-steer lane; and the open coalescing windows awaiting their flush.
   #turnAuthors = new Map();
+  // One-shot stop tokens for the ⏹ button on a running turn's placeholder.
+  #stopTokens = new Map();
   #coalescing = new Map();
   #autoSteerSameSender = false;
   #autoSteerLimit = 0;
@@ -786,6 +788,64 @@ export class TextHarnessBridge {
    * is in the Session transcript already. Local notices, command output, and
    * interaction prompts send on unstamped targets and stay readable as room facts.
    */
+  /**
+   * Mint the token behind one turn's ⏹ button.
+   *
+   * Single use and conversation-scoped: a press that arrives after the turn is
+   * gone must not stop whatever runs next in the chat.
+   */
+  #issueStopToken(conversationKey, senderId) {
+    if (typeof conversationKey !== 'string' || !conversationKey) return null;
+    if (!this.#presentationLevel) return null;
+    const token = randomBytes(9).toString('base64url');
+    this.#stopTokens.set(token, { conversationKey, senderId: String(senderId ?? '') });
+    while (this.#stopTokens.size > 64) {
+      this.#stopTokens.delete(this.#stopTokens.keys().next().value);
+    }
+    return token;
+  }
+
+  /** Drop a token even when its turn ended without a press. */
+  #retireStopToken(token) {
+    if (token) this.#stopTokens.delete(token);
+  }
+
+  /**
+   * Handle a ⏹ press. Returns false for payloads this bridge did not mint.
+   *
+   * Only the sender who opened the turn may stop it: in a group the button is
+   * visible to everyone.
+   */
+  async #handleStopPress(callback, key) {
+    const match = /^st\|([A-Za-z0-9_-]{8,16})$/u.exec(callback?.data ?? '');
+    if (!match) return false;
+    const token = match[1];
+    const entry = this.#stopTokens.get(token);
+    const allow = (text) => this.#answerInteractionCallback(callback, text);
+    if (!entry || entry.conversationKey !== key) {
+      await allow(t('这个停止按钮已失效，需要停止请发送 /stop。'));
+      return true;
+    }
+    if (entry.senderId && String(callback?.senderId ?? '') !== entry.senderId) {
+      await allow(t('只有发起这个任务的人可以停止它。'));
+      return true;
+    }
+    this.#stopTokens.delete(token);
+    await allow(t('已请求停止。'));
+    try {
+      const result = await this.#runMenuEntry('/stop', key);
+      if (result && !result.handled) await this.#bot.sendText(callback?.replyTarget ?? {}, t('已请求停止。'));
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] the ⏹ button could not stop the turn:`,
+        error?.message ?? error,
+      );
+    }
+    // The placeholder (and its keyboard) belongs to the stopping turn; the turn's
+    // own finish path deletes or collapses it.
+    return true;
+  }
+
   #turnDeliveryTarget(target, conversationKey) {
     if (!target || typeof target !== 'object'
       || typeof conversationKey !== 'string' || !conversationKey) return target;
@@ -1243,6 +1303,8 @@ export class TextHarnessBridge {
     // `standard` mode keeps its single placeholder moving during a long silent
     // tool call; null on every other rung, so their timers are untouched.
     let progressTimer = null;
+    // The ⏹ token of this turn, if one was minted; retired on every exit path.
+    let stopToken = null;
     // The compact runner is created inside the try but read by the failure
     // handler, which lives in the catch: the receipt must survive a throw.
     let turnProgress = null;
@@ -1394,6 +1456,9 @@ export class TextHarnessBridge {
       });
       let streamFinished = false;
       const level = this.#presentationLevel;
+      // A running turn's placeholder carries a ⏹ button on channels that can
+      // render one; the token is single-use and bound to this turn's sender.
+      stopToken = this.#issueStopToken(conversationKey, senderId);
       if (level === 'full' && typeof this.#bot.openThinkingStream === 'function') {
         try {
           stream = await this.#bot.openThinkingStream(this.#turnDeliveryTarget(target, conversationKey));
@@ -1409,7 +1474,10 @@ export class TextHarnessBridge {
       if (!stream) {
         if (typeof this.#bot.openDeliveryStream === 'function') {
           try {
-            stream = await this.#bot.openDeliveryStream(this.#turnDeliveryTarget(target, conversationKey));
+            stream = await this.#bot.openDeliveryStream({
+              ...this.#turnDeliveryTarget(target, conversationKey),
+              ...(stopToken ? { stopToken } : {}),
+            });
             semanticStream = true;
           } catch (error) {
             this.#logger.warn?.(
@@ -1904,6 +1972,7 @@ export class TextHarnessBridge {
       return error.deliveryReceipt;
     } finally {
       stopKeepalive();
+      this.#retireStopToken(stopToken);
       const inFlight = this.#turnAuthors.get(conversationKey);
       if (inFlight?.turnMessageId === messageId) this.#turnAuthors.delete(conversationKey);
       await Promise.allSettled([
@@ -2243,6 +2312,11 @@ export class TextHarnessBridge {
         return false;
       });
       if (handled) return;
+    }
+    // The ⏹ button on a running turn: checked first, because its payload carries
+    // no card registry entry to look up.
+    if (typeof callback?.data === 'string' && callback.data.startsWith('st|')) {
+      if (await this.#handleStopPress(callback, key)) return;
     }
     // The /start greeting is a launcher: a press replays the command it names and
     // leaves the card in place.

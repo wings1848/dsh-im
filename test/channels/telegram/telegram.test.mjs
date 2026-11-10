@@ -2230,7 +2230,9 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
       const messageId = nextOutboundMessageId;
       nextOutboundMessageId += 1;
       sent.push({ text, replyMarkup });
-      if (replyMarkup) {
+      // The placeholder now carries the ⏹ button; only the question card (its
+      // payloads start with `q|`) is the one to press here.
+      if (replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('q|')) {
         cardMessageId = messageId;
         // Press the second option (生产环境) exactly as a client would.
         pressedData = replyMarkup.inline_keyboard[1][0].callback_data;
@@ -2306,7 +2308,9 @@ test('Telegram runtime answers a question from an inline-keyboard press', async 
 
     // The question ships as a keyboard card, one button per option, each carrying
     // the presentation nonce alongside its indexes.
-    const card = sent.find((entry) => entry.replyMarkup);
+    // The placeholder also carries a keyboard now (⏹), so pick the question card
+    // by its payload rather than by "has markup".
+    const card = sent.find((entry) => entry.replyMarkup?.inline_keyboard?.[0]?.[0]?.callback_data?.startsWith('q|'));
     assert.ok(card, 'the question must be delivered with an inline keyboard');
     const rows = card.replyMarkup.inline_keyboard;
     assert.deepEqual(rows.map((row) => row[0].text), ['测试环境', '生产环境']);

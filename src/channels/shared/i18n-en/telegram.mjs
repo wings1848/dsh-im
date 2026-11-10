@@ -240,4 +240,9 @@ export default {
   '想看全部命令就点「菜单」，想调过程显示就点「显示挡位」。': 'Tap Menu for every command, or Display to change how much of a turn you see.',
   '已打开。': 'Opened.',
 
+  // ⏹ 停止按钮（5.10.1-wings.2）
+  '已请求停止。': 'Stop requested.',
+  '这个停止按钮已失效，需要停止请发送 /stop。': 'This stop button has expired; send /stop to stop the task.',
+  '只有发起这个任务的人可以停止它。': 'Only the person who started this task can stop it.',
+
 };

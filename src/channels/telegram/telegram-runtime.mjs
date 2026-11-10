@@ -1115,6 +1115,14 @@ export class TelegramBotClient {
     const placeholder = await this.#api.sendMessage({
       chatId: target.chatId,
       text: t('正在处理…'),
+      // A running turn can be stopped from its own message: the bridge mints a
+      // single-use token per turn, and the press is handled by its callback lane.
+      ...(typeof target?.stopToken === 'string' && target.stopToken
+        ? { replyMarkup: { inline_keyboard: [[{
+          text: t('⏹ 停止'),
+          callback_data: `st|${target.stopToken}`,
+        }]] } }
+        : {}),
       replyToMessageId: target.replyToMessageId,
       messageThreadId: target.messageThreadId,
       signal: this.#signal,
@@ -1220,6 +1228,9 @@ export class TelegramBotClient {
             chatId: target.chatId,
             messageId,
             text: receipt,
+            // The turn is over: a live ⏹ under a finished turn would stop the
+            // next one. Empty keyboard = remove it.
+            replyMarkup: { inline_keyboard: [] },
             signal: this.#signal,
           });
           return;
