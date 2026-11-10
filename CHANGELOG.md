@@ -35,12 +35,16 @@ This file records the notable changes in each dsh-im release. Its format follows
 - 新增 `/start` 欢迎卡：Telegram 新用户点 Start 时不再把这串命令丢给模型，而是收到一张三入口卡片（菜单 / 显示挡位 / 帮助），按下即 replay 对应命令；`/start` 在所有渠道都按本地命令处理。
   Added a `/start` greeting: Telegram's first-contact command is answered with a three-entry card (menu / display / help) instead of being sent to the model; `/start` counts as a local command on every channel.
 
+- `/status` 卡片新增「显示挡位」一行与「🎛 显示挡位」按钮：一眼看到当前挡位，一步跳到选择器（文本版 `/status` 逐字不变）。
+  The `/status` card now shows the current display level and offers a “🎛 Display” entry into the picker (the text `/status` stays byte-identical).
+
 - 极简 / 标准挡位的过程消息新增 `⏹ 停止` 按钮：一轮一个一次性 token，只认该回合的发起者；按下即请求停止并清掉键盘（回合结束后按钮不会留在聊天里）。
   The minimal/standard progress message gains a `⏹ Stop` button: one single-use token per turn, honoured only for the sender who started it; the turn is stopped and the keyboard is cleared when it ends.
 
 ### Tests / 测试
 
-- 全量 5088 例：5087 通过、0 失败。新增 `presentation-level.test.mjs`（8 例）、`presentation-levels.test.mjs`（17 例、含端到端按下用例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、配置持久化与不重连）与 `presentation-levels-runtime.test.mjs`（5 例，逐挡位钉住 Bot API 调用序列）。
+- 全量 5104 例：5103 通过、0 失败。新增 `presentation-level.test.mjs`（9 例）、`presentation-levels.test.mjs`（23 例，含 `/display` 经真实 runtime 出卡、连续点击不出死卡、不重连、群聊与 `/status` 刷新、`/start`、`⏹` 权限）、`presentation-levels-runtime.test.mjs`（10 例，逐挡位钉住 Bot API 调用序列与失败/无 callId/批处理结果分支）与 `welcome-card.test.mjs`（4 例）。
+- 真宿主实测（隔离 `DSH_HOME` + 假 Bot API + 假 LLM，非单测）：`/display` 卡片往返、`/status` 挡位行与按钮、`/start` 欢迎卡、`⏹` 停止（中断 `sleep 40`）、三挡位消息序列、失败工具 `· ⚠️ failed`、群聊命令。
 
 
 ## [5.10.0] - 2026-11-04
