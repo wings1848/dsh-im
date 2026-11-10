@@ -90,6 +90,10 @@ npm run build && npm pack && node scripts/verify-package.mjs
 2. ~~真实模型回合的三挡位渲染~~：已用本地假 LLM 在真宿主跑通（§6.1），含失败工具的分支。
 3. ~~`/status` 增加「当前挡位」一行~~：已做（§6.2）。
 
+### 5.1 已知但不打算改的
+
+- `/status` 卡片是**快照**：从它打开选择器改了挡位后，旧卡上的「显示挡位」一行仍是旧值（卡上有「刷新」按钮）。让它自动联动需要跨卡订阅，收益不抵复杂度。
+
 ## 6. 宿主级端到端实测（2026-11-10，无需 Telegram 账号）
 
 做法：在隔离的 `DSH_HOME=/tmp/dsh-e2e` 里装本仓打出的 `5.10.1-wings.2`，用本地 CONNECT 代理 + 自签 CA 冒充 `api.telegram.org`（脚本 `/tmp/e2e/mock-telegram.mjs`），让真 `dsh web` 带着插件连上一个假 bot，脚本化推送两条更新：私聊 `/display`、按钮「极简」，再推一条**群里没 @ 的 `/help`**。
