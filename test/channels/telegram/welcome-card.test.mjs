@@ -101,3 +101,32 @@ test('W4: another chat cannot press this greeting', async (t) => {
   );
   assert.deepEqual(ran, [], 'a press from another conversation does nothing');
 });
+
+test('W5: a superseded greeting is refused and its keyboard is cleared', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cleared = [];
+  const bot = {
+    async sendText() {},
+    async answerInteractionCallback() {},
+    async sendInteractionCard(_target, card) { cards.push(card); return { providerMessageIds: [String(700 + cards.length)] }; },
+    // Only the keyboard-only edit counts here: `editInteractionCard` would need a
+    // text and would throw on a real client.
+    async updateInteractionCard(target, messageId, payload) { cleared.push({ target, messageId, payload }); },
+  };
+  const cards = [];
+  const card = new TelegramWelcomeCard({ logger: quietLogger });
+  await card.present({ bot, target: { chatId: 42 }, conversationKey: 'direct:42' });
+  const first = card.registry.activeFor('direct:42');
+  await card.present({ bot, target: { chatId: 42 }, conversationKey: 'direct:42' });
+  const ran = [];
+  const notices = [];
+  await card.handlePress(
+    { data: TELEGRAM_WELCOME_CARD_CALLBACK.encode({ nonce: first.nonce, action: 'm' }), replyTarget: { chatId: 42 } },
+    { bot, answer: (text) => notices.push(text), conversationKey: 'direct:42', run: async (command) => { ran.push(command); return { handled: true }; } },
+  );
+  assert.deepEqual(ran, [], 'a superseded greeting must not run anything');
+  assert.equal(cleared.length, 1, 'the dead keyboard is removed through the keyboard-only API');
+  assert.equal(cleared[0].messageId, 701);
+  assert.deepEqual(cleared[0].payload, { markup: { inline_keyboard: [] } });
+});

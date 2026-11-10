@@ -9,8 +9,10 @@ import { isPresetCommand } from './preset-command.mjs';
 import { isWorkspaceCommand } from './workspace-command.mjs';
 
 const SIMPLE_TEXT_COMMANDS = new Set(['/help', '/status', '/new']);
-// `/start@botname` is what a group client sends; the suffix must be accepted.
-const START_COMMAND = /^\/start(?:@[A-Za-z0-9_]{1,32})?(?=$|\s)/iu;
+// Only the bare command: the runtime strips this bot's own `@mention` before the
+// bridge sees the text, so accepting any suffix here would let `/start@other_bot`
+// wake this bot in a group.
+const START_COMMAND = /^\/start(?=$|\s)/iu;
 
 /** Telegram's first-contact command; answered locally by every channel. */
 export function isStartCommand(text) {

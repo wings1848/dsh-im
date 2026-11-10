@@ -1160,6 +1160,9 @@ export class TelegramBotClient {
     let windowTimer = null;
     let windowEndsAt = 0;
     let closed = false;
+    // The placeholder is deleted at most once: the failure path and a later
+    // cancel both want it gone, and a second delete is just a 400 in the log.
+    let placeholderDeleted = false;
     let stream = null;
     const clearWindowTimer = () => {
       if (windowTimer === null) return;
@@ -1238,7 +1241,10 @@ export class TelegramBotClient {
           this.#logger.warn?.('[dsh-im:telegram] unable to leave the turn receipt:', error);
         }
       }
-      await this.#deletePlaceholder(target, messageId);
+      if (!placeholderDeleted) {
+        placeholderDeleted = true;
+        await this.#deletePlaceholder(target, messageId);
+      }
     };
     stream = new TelegramDeliveryStream({
       update: (block) => pushProgress(block),
@@ -1251,17 +1257,25 @@ export class TelegramBotClient {
         await drainHeld();
         // A failed turn leaves no receipt: the error message is its terminal
         // state, so the placeholder is dropped rather than rewritten.
-        await this.#deletePlaceholder(target, messageId);
+        if (!placeholderDeleted) {
+          placeholderDeleted = true;
+          await this.#deletePlaceholder(target, messageId);
+        }
         return this.#sendPlain(target, block.text);
       },
       // A cancelled turn must not wake up later and rewrite the placeholder the
       // reader has already stopped watching — and its ⏹ button must not outlive
       // it: the token is gone, so a leftover button could only apologise.
+      // The failure path may already have dropped it; deleting twice is a 400 the
+      // API call swallows, so this stays a single idempotent guard.
       onCancel: () => {
         closed = true;
         clearWindowTimer();
         held = null;
-        void this.#deletePlaceholder(target, messageId);
+        if (!placeholderDeleted) {
+          placeholderDeleted = true;
+          void this.#deletePlaceholder(target, messageId);
+        }
       },
       presentation: 'telegram-regular',
       // Answer text is not mirrored into the placeholder: it is deleted before

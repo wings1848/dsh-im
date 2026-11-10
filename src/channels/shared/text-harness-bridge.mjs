@@ -852,7 +852,11 @@ export class TextHarnessBridge {
     // is cancelling, its own "已停止。" is the single notice the reader needs.
     const stopped = result?.stopped === true;
     const notice = typeof result?.message === 'string' ? result.message.trim() : '';
-    if (!stopped && notice) await this.#bot.sendText(callback?.replyTarget ?? {}, notice);
+    // The front turn reports its own ending ("已停止。"); a background stop has no
+    // such turn to do it, so its message is the only place that notice can land.
+    if (notice && (!stopped || result?.background === true)) {
+      await this.#bot.sendText(callback?.replyTarget ?? {}, notice);
+    }
     return true;
   }
 
@@ -3493,6 +3497,13 @@ export class TextHarnessBridge {
         conversationKey: key,
       });
       return { handled: true };
+    }
+    // `/menu` is a card too (and has no text runner), so a card entry that opens
+    // it has to present the hub instead of falling through to "cannot open".
+    if (/^\/menu$/iu.test(command) && this.#menuCard
+      && typeof this.#bot?.sendInteractionCard === 'function') {
+      const presented = await this.#presentMenuHub({ replyTarget: callback?.replyTarget ?? {} }, null, key);
+      if (presented) return { handled: true };
     }
     return this.#runMenuEntry(command, key);
   }

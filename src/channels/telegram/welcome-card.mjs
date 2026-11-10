@@ -223,16 +223,16 @@ export class TelegramWelcomeCard {
   }
 
   async #retireKeyboard(bot, nonce) {
-    if (typeof bot?.editInteractionCard !== 'function') return;
     const record = this.#records.get(nonce);
-    const messageId = Number(record?.messageId);
-    if (!record?.target || !Number.isSafeInteger(messageId)) {
-      this.#records.delete(nonce);
-      return;
-    }
     this.#records.delete(nonce);
+    // `editInteractionCard` rewrites text *and* keyboard, and the Bot API refuses a
+    // text-less edit — retiring a dead greeting only needs the keyboard removed,
+    // which is `updateInteractionCard`'s job (approval-card does the same).
+    if (!record || typeof bot?.updateInteractionCard !== 'function') return;
+    const messageId = Number(record.messageId);
+    if (!Number.isSafeInteger(messageId) || messageId <= 0) return;
     try {
-      await bot.editInteractionCard(record.target, messageId, { markup: { inline_keyboard: [] } });
+      await bot.updateInteractionCard(record.target, messageId, { markup: { inline_keyboard: [] } });
     } catch {
       // Best effort: the greeting is already dead.
     }

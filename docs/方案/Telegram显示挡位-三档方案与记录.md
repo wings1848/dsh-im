@@ -103,6 +103,17 @@ npm run build && npm pack && node scripts/verify-package.mjs
 
 顺带清理：`/start` 与 `isStartCommand` 去重、支持 `/start@botname`、删掉死条件、`full` 挡位不再白铸 token、欢迎卡只渲染一次、`run-host-e2e.sh` 先查端口占用。
 
+### 4.3 第 3.5 轮复审（针对修复本身）
+
+| # | 问题 | 修法 |
+| --- | --- | --- |
+| F1 | 欢迎卡退键盘用了 `editInteractionCard`（要求文本），真实客户端直接抛 TypeError，被 catch 吞掉 → 被取代的旧卡键盘永远清不掉 | 改用 `updateInteractionCard`（只改键盘），并在删除记录前取 id |
+| F2 | 为支持 `/start@bot` 放开任意后缀 → 群里 `/start@别的bot` 会唤醒本 bot | 收回到只认裸 `/start`（本 bot 自己的 `@` 在进桥前已被剥离） |
+| F3 | 后台任务停止的提示被 `!stopped` 条件吞掉 | `commandResult` 补 `background` 标记，桥按它决定是否补发 |
+| F4 | 失败路径与 cancel 会删两次占位 | 加 `placeholderDeleted` 一次性守卫 |
+| F9 | 欢迎卡里的「菜单」按钮打不开（没有文本 runner） | 卡片入口里 `/menu` 直接 present hub 卡 |
+| F5/F6 | 矩阵只数 `Stopped`、欢迎卡 fake bot 没有清键盘 API，F1 漏网 | 矩阵补计数断言；W5 用例只在 `updateInteractionCard` 上断言 |
+
 ### 5.1 已知但不打算改的
 
 - `/status` 卡片是**快照**：从它打开选择器改了挡位后，旧卡上的「显示挡位」一行仍是旧值（卡上有「刷新」按钮）。让它自动联动需要跨卡订阅，收益不抵复杂度。

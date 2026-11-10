@@ -888,3 +888,91 @@ test('L23: a running turn carries a ⏹ button, and only its sender can press it
   release();
   await turn.catch(() => {});
 });
+
+test('L24: a ⏹ press with nothing to stop says so in the chat', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const sent = [];
+  const acks = [];
+  const { stream } = streamFixture();
+  let stopToken = null;
+  let release = () => {};
+  const state = memoryState();
+  await state.setSession('direct:u1', 'session-stop');
+  const harness = harnessFixture({
+    onAsk: async (options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"sleep 60"}' });
+      await new Promise((resolve) => { release = resolve; });
+    },
+  });
+  // The harness reports "nothing was running" — the reader must see that, because
+  // the toast already claimed a stop was requested.
+  harness.workspaceSession = () => ({
+    async sessionExists() { return true; },
+    async stopActiveTurn() { return false; },
+    ask: (prompt, options) => harness.ask('session-stop', prompt, options),
+  });
+  const bridge = new TelegramHarnessBridge({
+    bot: {
+      async sendText(_target, text) { sent.push(text); },
+      async sendTyping() {},
+      async answerInteractionCallback(_id, text) { acks.push(text); },
+      async openDeliveryStream(target) { stopToken = target.stopToken ?? null; return stream; },
+    },
+    state,
+    presentationLevel: 'standard',
+    logger: quietLogger,
+    harness,
+  });
+  const turn = bridge.accept(message({ messageId: 'm-nostop', content: 'long task' }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.ok(stopToken, 'a stop token was issued');
+  await bridge.acceptCallback({
+    conversationId: 'u1', senderId: 'u1', messageId: '1', kind: 'direct',
+    data: `st|${stopToken}`, replyTarget: { chatId: 42 },
+  });
+  assert.match(acks.at(-1) ?? '', /已请求停止/u);
+  assert.ok(sent.some((text) => /没有正在运行的任务/u.test(text)),
+    `the chat must correct the toast, saw ${JSON.stringify(sent)}`);
+  release();
+  await turn.catch(() => {});
+});
+
+test('L25: the greeting\'s 菜单 entry opens the hub instead of failing', async (t) => {
+  const previous = setImHostLanguage('zh');
+  t.after(() => setImHostLanguage(previous));
+  const cards = [];
+  const acks = [];
+  const bot = {
+    async sendText() {},
+    async sendTyping() {},
+    async answerInteractionCallback(_id, text) { acks.push(text); },
+    async sendInteractionCard(_target, card) { cards.push(card); return { providerMessageIds: [String(600 + cards.length)] }; },
+  };
+  const bridge = new TelegramHarnessBridge({
+    bot,
+    state: { hasSeen: () => false, markSeen: async () => {}, sessionFor: () => null },
+    harness: {
+      ensureRunning: async () => true,
+      currentWorkspace: () => '/home/wings/e2e',
+      currentConversationWorkspace: () => '/home/wings/e2e',
+      status: async () => ({ connected: true }),
+      hostDescribe: async () => ({ version: '0.2.2' }),
+    },
+    presentationLevel: 'standard',
+    logger: { warn() {}, error() {} },
+  });
+  await bridge.accept({
+    messageId: 'g1', senderId: '42', kind: 'direct', conversationId: '42',
+    content: '/start', addressed: true, replyTarget: { chatId: 42 },
+  });
+  assert.equal(cards.length, 1, 'greeting first');
+  const menuButton = cards[0].markup.inline_keyboard.flat().find((button) => /菜单/u.test(button.text));
+  assert.ok(menuButton, 'the greeting offers the menu');
+  await bridge.acceptCallback({
+    conversationId: '42', senderId: '42', messageId: '600', kind: 'direct',
+    data: menuButton.callback_data, replyTarget: { chatId: 42 },
+  });
+  assert.equal(cards.length, 2, 'the hub card was sent');
+  assert.ok(!acks.some((text) => /无法打开/u.test(text ?? '')), acks.join('|'));
+});
