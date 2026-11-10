@@ -92,11 +92,12 @@ function botFixture({ stream, onOpen } = {}) {
   return { bot, texts };
 }
 
-function harnessFixture({ onAsk } = {}) {
+function harnessFixture({ onAsk, workspaceSession } = {}) {
   return {
     async ensureRunning() { return true; },
     async sessionExists() { return true; },
     async createSession() { return 'session-x'; },
+    ...(typeof workspaceSession === 'function' ? { workspaceSession } : {}),
     async ask(_sessionId, _text, options) {
       if (onAsk) await onAsk(options);
       return '**final**';
@@ -830,17 +831,38 @@ test('L23: a running turn carries a ⏹ button, and only its sender can press it
   };
   let release = () => {};
   let stopToken = null;
+  const stopCalls = [];
+  // The turn must be bound to a Session, otherwise `/stop` answers "nothing is
+  // running" and never reaches the harness.
+  const state = memoryState();
+  await state.setSession('direct:u1', 'session-stop');
+  const harness = harnessFixture({
+    onAsk: async (options) => {
+      await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"sleep 60"}' });
+      await new Promise((resolve) => { release = resolve; });
+    },
+  });
+  // The ⏹ path reaches `session.stopActiveTurn(control, …)`: without a bound
+  // session this fixture would fall out at `boundSession` and the "missing
+  // control" regression would stay invisible. The stub session delegates `ask`
+  // so the turn itself still runs through the fixture above.
+  harness.workspaceSession = () => ({
+    async sessionExists() { return true; },
+    async stopActiveTurn(control) {
+      stopCalls.push(control);
+      release();
+      return true;
+    },
+    // The harness-level fixture is `ask(sessionId, prompt, options)`; the session
+    // one is `ask(prompt, options)`.
+    ask: (prompt, options) => harness.ask('session-stop', prompt, options),
+  });
   const bridge = new TelegramHarnessBridge({
     bot,
-    state: memoryState(),
+    state,
     presentationLevel: 'standard',
     logger: quietLogger,
-    harness: harnessFixture({
-      onAsk: async (options) => {
-        await options.onUpdate({ type: 'tool', name: 'bash', arguments: '{"command":"sleep 60"}' });
-        await new Promise((resolve) => { release = resolve; });
-      },
-    }),
+    harness,
   });
   const turn = bridge.accept(message({ messageId: 'm-stop', content: 'run a long task' }));
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -861,6 +883,8 @@ test('L23: a running turn carries a ⏹ button, and only its sender can press it
     data: `st|${stopToken}`, replyTarget: { chatId: 42 },
   });
   assert.match(acks.at(-1) ?? '', /已请求停止/u);
+  assert.equal(stopCalls.length, 1, 'the harness was actually asked to stop the turn');
+  assert.deepEqual(stopCalls[0], { owner: bridge, key: 'direct:u1' }, 'with the control handle the typed /stop passes');
   release();
   await turn.catch(() => {});
 });

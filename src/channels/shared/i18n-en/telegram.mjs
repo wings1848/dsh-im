@@ -245,4 +245,6 @@ export default {
   '这个停止按钮已失效，需要停止请发送 /stop。': 'This stop button has expired; send /stop to stop the task.',
   '只有发起这个任务的人可以停止它。': 'Only the person who started this task can stop it.',
 
+  '停止没有生效，请发送 /stop 重试。': 'The stop did not take effect; send /stop to try again.',
+
 };

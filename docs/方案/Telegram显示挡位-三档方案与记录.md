@@ -91,6 +91,18 @@ npm run build && npm pack && node scripts/verify-package.mjs
 2. ~~真实模型回合的三挡位渲染~~：已用本地假 LLM 在真宿主跑通（§6.1），含失败工具的分支。
 3. ~~`/status` 增加「当前挡位」一行~~：已做（§6.2）。
 
+### 4.2 第三轮评审（welcome/⏹/矩阵）修掉的问题
+
+| # | 问题 | 修法 |
+| --- | --- | --- |
+| M1 | ⏹ 先 ack「已请求停止」再执行，`/stop` 的结果被丢弃：没任务在跑时读者被骗 | 执行后按 `result.stopped` 判定；没停成时把 `/stop` 的原话补发到聊天 |
+| M2 | 欢迎卡不校验 `status`，TTL 与「被取代」失效 | 补 `ACTIVE` 校验 + `claim`/`releaseClaim`，与其它卡一致 |
+| M3 | 取消（abort/失败）时占位保留，留下点不动的 ⏹ | `onCancel` 顺手删占位（token 已回收，按钮只会道歉） |
+| M4 | L23 用例的 fixture 没绑会话，测不到 `control`（上轮 bug 复现不了） | 绑定会话 + stub `sessionExists`/`stopActiveTurn`/`ask`，断言 `control:{owner,key}` 真的传下去 |
+| M5 | 矩阵断言只看「有没有 delete」，不看删的是哪条；顺序/次数都不校验 | mock 记 `messageId`；断言删除对象=占位、ack 在 delete 之前、停止只报一次；半行 JSON 跳过 |
+
+顺带清理：`/start` 与 `isStartCommand` 去重、支持 `/start@botname`、删掉死条件、`full` 挡位不再白铸 token、欢迎卡只渲染一次、`run-host-e2e.sh` 先查端口占用。
+
 ### 5.1 已知但不打算改的
 
 - `/status` 卡片是**快照**：从它打开选择器改了挡位后，旧卡上的「显示挡位」一行仍是旧值（卡上有「刷新」按钮）。让它自动联动需要跨卡订阅，收益不抵复杂度。

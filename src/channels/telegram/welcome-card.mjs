@@ -59,7 +59,7 @@ const DEFAULT_STATE_TEXTS = Object.freeze({
 });
 
 /** The greeting body: what this bot is, and the three things worth knowing. */
-export function welcomeCardText({ label = 'Telegram', level = null, levelLabel = null } = {}) {
+export function welcomeCardText({ label = 'Telegram', levelLabel = null } = {}) {
   const lines = [
     t('👋 你好，{label} 已连接 DeepSeek Harness。', { label }),
     '',
@@ -73,9 +73,9 @@ export function welcomeCardText({ label = 'Telegram', level = null, levelLabel =
 }
 
 /** Paint the three entries. */
-export function renderWelcomeCard(nonce) {
+export function renderWelcomeCard(nonce, { levelLabel = null } = {}) {
   return {
-    text: welcomeCardText(),
+    text: welcomeCardText({ levelLabel }),
     markup: {
       inline_keyboard: [[
         ...Object.values(TELEGRAM_WELCOME_ACTIONS).map((action) => ({
@@ -140,8 +140,7 @@ export class TelegramWelcomeCard {
     if (!target || typeof conversationKey !== 'string' || !conversationKey) return false;
     if (typeof bot?.sendInteractionCard !== 'function') return false;
     const entry = this.#registry.issue({ conversationKey, kind: 'welcome' });
-    const card = renderWelcomeCard(entry.nonce);
-    card.text = welcomeCardText({ label: 'Telegram', levelLabel });
+    const card = renderWelcomeCard(entry.nonce, { levelLabel });
     let sent;
     try {
       sent = await bot.sendInteractionCard(target, card);
@@ -179,6 +178,20 @@ export class TelegramWelcomeCard {
       await notice(actionCardStateText(ACTION_CARD_STATUS.UNKNOWN, this.#notices));
       return true;
     }
+    // An old greeting must not open the console ten minutes later, and a card a
+    // newer greeting replaced must not answer: the registry already knows both.
+    if (owned.status !== ACTION_CARD_STATUS.ACTIVE) {
+      await notice(actionCardStateText(owned.status, this.#notices));
+      if (owned.status !== ACTION_CARD_STATUS.CLAIMED) {
+        await this.#retireKeyboard(bot, owned.nonce);
+      }
+      return true;
+    }
+    const claim = this.#registry.claim(press.nonce);
+    if (claim.status !== ACTION_CARD_STATUS.ACTIVE) {
+      await notice(actionCardStateText(claim.status, this.#notices));
+      return true;
+    }
     const command = welcomeActionCommand(press.action);
     if (!command) {
       await notice(actionCardStateText(ACTION_CARD_STATUS.STALE, this.#notices));
@@ -195,14 +208,34 @@ export class TelegramWelcomeCard {
       result = null;
     }
     if (!result?.handled) {
+      this.#registry.releaseClaim(owned.nonce);
       await notice(t('暂时无法打开，请直接发送命令。'));
       return true;
     }
+    // Release the claim instead of settling: the greeting stays usable for the
+    // next entry (it is a launcher, not a one-shot confirmation).
+    this.#registry.releaseClaim(owned.nonce);
     for (const reply of result.messages ?? (result.message ? [result.message] : [])) {
       await bot?.sendText?.(callback?.replyTarget, reply);
     }
     await notice(t('已打开。'));
     return true;
+  }
+
+  async #retireKeyboard(bot, nonce) {
+    if (typeof bot?.editInteractionCard !== 'function') return;
+    const record = this.#records.get(nonce);
+    const messageId = Number(record?.messageId);
+    if (!record?.target || !Number.isSafeInteger(messageId)) {
+      this.#records.delete(nonce);
+      return;
+    }
+    this.#records.delete(nonce);
+    try {
+      await bot.editInteractionCard(record.target, messageId, { markup: { inline_keyboard: [] } });
+    } catch {
+      // Best effort: the greeting is already dead.
+    }
   }
 
   #pruneRecords() {

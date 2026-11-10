@@ -15,6 +15,7 @@ import {
   COMMAND_PERMISSION_DENIED_MESSAGE,
   evaluateInboundAccess,
 } from './inbound-access.mjs';
+import { isStartCommand } from './command-permission.mjs';
 import {
   captureContextEnhancement,
   captureContextEnhancementSource,
@@ -209,13 +210,6 @@ const PENDING_RESTART_NOTICE = '排队中的消息在服务重启时被中断。
  */
 function isBareCommand(command, name) {
   return command === name || command.startsWith(`${name} `) || command.startsWith(`${name}\t`);
-}
-
-/** Telegram's first-contact command: answered locally, never forwarded. */
-const START_COMMAND_PATTERN = /^\/start(?=$|\s)/iu;
-
-function isStartText(text) {
-  return typeof text === 'string' && START_COMMAND_PATTERN.test(text.trim());
 }
 
 /** True when a bare command carries words after it. */
@@ -796,7 +790,8 @@ export class TextHarnessBridge {
    */
   #issueStopToken(conversationKey, senderId) {
     if (typeof conversationKey !== 'string' || !conversationKey) return null;
-    if (!this.#presentationLevel) return null;
+    // `full` has no placeholder message to hang a button on.
+    if (!this.#presentationLevel || this.#presentationLevel === 'full') return null;
     const token = randomBytes(9).toString('base64url');
     this.#stopTokens.set(token, { conversationKey, senderId: String(senderId ?? '') });
     while (this.#stopTokens.size > 64) {
@@ -831,14 +826,14 @@ export class TextHarnessBridge {
       return true;
     }
     this.#stopTokens.delete(token);
+    // The toast has to go out immediately (Telegram wants the ack fast), but it
+    // must not claim more than we know yet: the chat gets the real outcome below.
     await allow(t('已请求停止。'));
+    let result = null;
     try {
       // Same options the typed `/stop` uses: without `control` the harness cannot
       // tell which turn to cancel, and the request silently does nothing.
-      // The press is already acknowledged; the turn's own ending ("已停止。") is
-      // the only extra message the reader needs — a second notice here would be
-      // the same sentence twice.
-      await runControlCommand('/stop', this.#harness, this.#state, key, {
+      result = await runControlCommand('/stop', this.#harness, this.#state, key, {
         signal: this.#signal,
         control: { owner: this, key },
         deferredDelivery: this.#deferred,
@@ -848,9 +843,16 @@ export class TextHarnessBridge {
         `[dsh-im:${this.#descriptor.key}] the ⏹ button could not stop the turn:`,
         error?.message ?? error,
       );
+      await this.#bot.sendText(callback?.replyTarget ?? {}, t('停止没有生效，请发送 /stop 重试。'));
+      return true;
     }
-    // The placeholder (and its keyboard) belongs to the stopping turn; the turn's
-    // own finish path deletes or collapses it.
+    // A stop that did not actually cancel anything ("当前聊天没有正在运行的任务。",
+    // "无法安全停止后台任务…") must land in the chat: the toast above already
+    // said "已请求停止", and only the message can correct it. When the turn really
+    // is cancelling, its own "已停止。" is the single notice the reader needs.
+    const stopped = result?.stopped === true;
+    const notice = typeof result?.message === 'string' ? result.message.trim() : '';
+    if (!stopped && notice) await this.#bot.sendText(callback?.replyTarget ?? {}, notice);
     return true;
   }
 
@@ -1376,8 +1378,7 @@ export class TextHarnessBridge {
       }
       // `/start` is the first thing Telegram sends a new reader; answer it with
       // a greeting instead of forwarding the literal string to the model.
-      if (!hasImages && !hasFiles && isStartText(text)
-        && (message.kind === 'direct' || message.addressed === true)) {
+      if (!hasImages && !hasFiles && isStartCommand(text)) {
         if (await this.#presentWelcomeCard(target, conversationKey)) return;
         await this.#bot.sendText(target, t('已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。'));
         return;

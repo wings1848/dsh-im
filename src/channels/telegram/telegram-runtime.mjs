@@ -1255,11 +1255,13 @@ export class TelegramBotClient {
         return this.#sendPlain(target, block.text);
       },
       // A cancelled turn must not wake up later and rewrite the placeholder the
-      // reader has already stopped watching.
+      // reader has already stopped watching — and its ⏹ button must not outlive
+      // it: the token is gone, so a leftover button could only apologise.
       onCancel: () => {
         closed = true;
         clearWindowTimer();
         held = null;
+        void this.#deletePlaceholder(target, messageId);
       },
       presentation: 'telegram-regular',
       // Answer text is not mirrored into the placeholder: it is deleted before

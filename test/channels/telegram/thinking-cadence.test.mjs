@@ -609,7 +609,10 @@ test('cancel() drops the pending window timer instead of sending the held frame 
 
   stream.cancel();
   await advance(t, 30_000);
-  assert.deepEqual(events, ['edit 1. one'], 'a cancelled turn must not rewrite the placeholder later');
+  // The pending frame is dropped, and the placeholder (with any ⏹ keyboard) is
+  // deleted so a cancelled turn leaves nothing to click.
+  assert.deepEqual(events, ['edit 1. one', 'delete placeholder'],
+    'a cancelled turn drops its placeholder instead of rewriting it later');
 });
 
 test('a window that expired unseen is cleared, so its overdue timer cannot release the next frame', async (t) => {
