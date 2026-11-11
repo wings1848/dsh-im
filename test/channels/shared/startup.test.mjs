@@ -218,6 +218,7 @@ test('the composed host serves other real channels while Feishu is loading and a
     await new Promise(setImmediate);
     assert.equal(f.routes.size, channels.length + 2);
     assert.equal(f.routes.has('/dsh-im-sidebar'), true);
+    assert.equal(f.routes.has('/dsh-im-notify'), true);
     await allLoaded.promise;
     assert.equal((await f.call('feishu')).error.code, 'feishu-initializing');
     // Let the other channels finish their local workspace reconciliation.

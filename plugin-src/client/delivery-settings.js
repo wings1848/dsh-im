@@ -28,6 +28,15 @@ export const DELIVERY_ENDPOINTS = Object.freeze({
   test: 'target.test',
 });
 
+// The default notification target lives on its own management channel: it is
+// global (one target for every Session), not per bot like the delivery targets.
+export const NOTIFY_RPC_CHANNEL = '/dsh-im-notify';
+
+export const NOTIFY_ENDPOINTS = Object.freeze({
+  get: 'settings.notify-target.get',
+  set: 'settings.notify-target.set',
+});
+
 export const BOT_SETTINGS_TABS = Object.freeze([
   Object.freeze({ id: 'general', label: '通用' }),
   Object.freeze({ id: 'delivery', label: '投递设置' }),
@@ -174,6 +183,16 @@ function targetsFrom(value) {
 function suggestionsFrom(value) {
   if (Array.isArray(value)) return value;
   return Array.isArray(value?.suggestions) ? value.suggestions : [];
+}
+
+// An entry the Host cannot resolve is treated as "no default" so the control
+// only ever reflects a target that exists in the stored settings.
+function defaultTargetFrom(value) {
+  const candidate = value?.defaultTarget;
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const { botId, targetId } = candidate;
+  if (typeof botId !== 'string' || !botId || typeof targetId !== 'string' || !targetId) return null;
+  return { botId, targetId };
 }
 
 function kindLabel(definition, kind) {
@@ -509,10 +528,22 @@ function TargetSuggestionPicker({
       h(DeliveryButton, { onClick: onManual }, '手动填写（高级）')));
 }
 
-function TargetRow({ definition, target, botId, connected, rpcCall, onChanged, onEdit }) {
+function TargetRow({
+  definition,
+  target,
+  botId,
+  connected,
+  rpcCall,
+  onChanged,
+  onEdit,
+  notifyAvailable = false,
+  isDefaultNotifyTarget = false,
+  onToggleDefaultNotifyTarget,
+}) {
   const [action, setAction] = React.useState(null);
   const [testState, setTestState] = React.useState(null);
   const [syncFeedback, setSyncFeedback] = React.useState(null);
+  const [defaultFeedback, setDefaultFeedback] = React.useState(null);
   const [copyState, setCopyState] = React.useState(null);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const sessionSync = target.sessionSync ?? { enabled: false, state: 'unavailable' };
@@ -580,6 +611,26 @@ function TargetRow({ definition, target, botId, connected, rpcCall, onChanged, o
     }
   };
 
+  const toggleDefaultNotifyTarget = async () => {
+    if (typeof onToggleDefaultNotifyTarget !== 'function') return;
+    setAction('default');
+    setDefaultFeedback(null);
+    try {
+      const selected = await onToggleDefaultNotifyTarget(target);
+      setDefaultFeedback({
+        tone: 'success',
+        message: selected ? '已设为默认通知目标' : '已取消默认通知目标',
+      });
+    } catch (error) {
+      setDefaultFeedback({
+        tone: 'error',
+        message: presentError(error, '默认通知目标设置失败，请稍后重试。'),
+      });
+    } finally {
+      setAction(null);
+    }
+  };
+
   return h('li', { className: 'dim-targetRow', 'data-target-id': target.targetId },
     h('div', { className: 'dim-targetSummary' },
       h('div', { className: 'dim-targetTitle' },
@@ -600,6 +651,20 @@ function TargetRow({ definition, target, botId, connected, rpcCall, onChanged, o
         onClick: () => setConfirmDelete(true),
         disabled: Boolean(action),
       }, '删除')),
+    notifyAvailable
+      ? h('div', {
+          className: 'dim-targetDefaultNotify',
+          style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
+        },
+        h(DeliveryButton, {
+          kind: isDefaultNotifyTarget ? 'primary' : 'secondary',
+          onClick: () => void toggleDefaultNotifyTarget(),
+          disabled: !connected || Boolean(action),
+          'aria-pressed': isDefaultNotifyTarget,
+          'aria-label': '默认通知目标',
+          title: connected ? undefined : '机器人离线时不可设置默认通知目标',
+        }, isDefaultNotifyTarget ? '✓ 默认通知' : '设为默认通知'))
+      : null,
     h('label', { className: 'dim-targetSessionSync' },
       h('span', { className: 'dim-targetSessionSyncCopy' },
         h('strong', null, '会话双向同步'),
@@ -618,6 +683,12 @@ function TargetRow({ definition, target, botId, connected, rpcCall, onChanged, o
       'data-tone': syncFeedback.tone,
       role: 'alert',
     }, syncFeedback.message) : null,
+    defaultFeedback ? h('p', {
+      className: 'dim-targetFeedback',
+      'data-tone': defaultFeedback.tone,
+      role: 'status',
+      'aria-live': 'polite',
+    }, defaultFeedback.message) : null,
     testState ? h('p', {
       className: 'dim-targetFeedback',
       'data-tone': testState.tone,
@@ -647,6 +718,7 @@ export function DeliveryTargetSettingsPage({
   account,
   rpcCall,
   accessRpcCall,
+  notifyRpcCall,
   onBack,
 }) {
   const definition = CHANNEL_DEFINITIONS[channel];
@@ -665,6 +737,10 @@ export function DeliveryTargetSettingsPage({
   // so the saved panel has to land here — a stale account would put the
   // pre-save list back on screen and into the next "copy to other bots" payload.
   const [slashPanel, setSlashPanel] = React.useState(account.slashPanel);
+  // Global, not per bot: the page must hide the control until the Host answered
+  // on the notify channel, so an older Host never shows a dead switch.
+  const [defaultNotifyTarget, setDefaultNotifyTarget] = React.useState(null);
+  const [notifyPhase, setNotifyPhase] = React.useState('unavailable');
   const mounted = React.useRef(true);
 
   React.useEffect(() => {
@@ -679,6 +755,31 @@ export function DeliveryTargetSettingsPage({
     if (typeof rpcCall !== 'function') throw new Error('投递目标设置暂不可用。');
     return unwrapRpcResult(await rpcCall(endpoint, payload, signal));
   }, [rpcCall]);
+
+  const invokeNotify = React.useCallback(async (endpoint, payload = {}, signal) => {
+    if (typeof notifyRpcCall !== 'function') throw new Error('默认通知目标暂不可用。');
+    return unwrapRpcResult(await notifyRpcCall(endpoint, payload, signal));
+  }, [notifyRpcCall]);
+
+  const loadDefaultNotifyTarget = React.useCallback(async ({ signal } = {}) => {
+    if (typeof notifyRpcCall !== 'function') {
+      if (mounted.current) setNotifyPhase('unavailable');
+      return;
+    }
+    setNotifyPhase('loading');
+    try {
+      const value = await invokeNotify(NOTIFY_ENDPOINTS.get, {}, signal);
+      if (signal?.aborted || !mounted.current) return;
+      setDefaultNotifyTarget(defaultTargetFrom(value));
+      setNotifyPhase('ready');
+    } catch (caught) {
+      // The channel or the Host half may be missing: keep the page usable and
+      // simply leave the control out instead of surfacing an uncaught error.
+      if (signal?.aborted || caught?.name === 'AbortError' || !mounted.current) return;
+      setDefaultNotifyTarget(null);
+      setNotifyPhase('unavailable');
+    }
+  }, [invokeNotify, notifyRpcCall]);
 
   const loadTargets = React.useCallback(async ({ signal, silent = false } = {}) => {
     if (!silent) setPhase('loading');
@@ -714,11 +815,12 @@ export function DeliveryTargetSettingsPage({
     mounted.current = true;
     const controller = new AbortController();
     void loadTargets({ signal: controller.signal });
+    void loadDefaultNotifyTarget({ signal: controller.signal });
     return () => {
       mounted.current = false;
       controller.abort();
     };
-  }, [loadTargets]);
+  }, [loadTargets, loadDefaultNotifyTarget]);
 
   if (!definition) {
     return h('section', { className: 'dim-deliveryPage' },
@@ -747,6 +849,27 @@ export function DeliveryTargetSettingsPage({
     } finally {
       if (mounted.current) setSaving(false);
     }
+  };
+
+  // Clicking the selected target clears the default; every other row replaces
+  // it. Returns whether this target is the default after the write, so the row
+  // reports what the Host actually stored instead of what was requested.
+  const toggleDefaultNotifyTarget = async (target) => {
+    const next = defaultNotifyTarget?.botId === account.botId
+      && defaultNotifyTarget?.targetId === target.targetId
+      ? null
+      : { botId: account.botId, targetId: target.targetId };
+    const value = await invokeNotify(NOTIFY_ENDPOINTS.set, { defaultTarget: next });
+    const applied = value && typeof value === 'object' && Object.hasOwn(value, 'defaultTarget')
+      ? defaultTargetFrom(value)
+      : next;
+    if (mounted.current) {
+      setDefaultNotifyTarget(applied);
+      setNotifyPhase('ready');
+    }
+    return Boolean(applied
+      && applied.botId === account.botId
+      && applied.targetId === target.targetId);
   };
 
   const openSuggestionPicker = () => {
@@ -864,6 +987,9 @@ export function DeliveryTargetSettingsPage({
     h('div', { className: 'dim-deliverySectionHeading' },
       h('div', null,
         h('h3', { id: 'dim-delivery-targets-title' }, '投递目标'),
+        notifyPhase === 'ready' && targets.length > 0
+          ? h('p', null, '默认通知目标对所有会话生效，供 dsh_im_notify 在未指定目标时使用。')
+          : null,
         account.connected
           ? null
           : h('p', null, '机器人当前离线；仍可配置目标，恢复连接后再测试。')),
@@ -926,5 +1052,9 @@ export function DeliveryTargetSettingsPage({
               rpcCall: invoke,
               onChanged: () => loadTargets({ silent: true }),
               onEdit: () => setEditor({ mode: 'edit', target, source: 'edit' }),
+              notifyAvailable: notifyPhase === 'ready',
+              isDefaultNotifyTarget: defaultNotifyTarget?.botId === account.botId
+                && defaultNotifyTarget?.targetId === target.targetId,
+              onToggleDefaultNotifyTarget: toggleDefaultNotifyTarget,
             })))))));
 }

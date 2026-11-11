@@ -140,6 +140,26 @@ Choose a known conversation whenever possible. Obtain and enter a platform-nativ
 
 Native ID strings must be nonempty and have no leading or trailing whitespace. A target accepts only the fields required by the selected channel and type; extra fields are rejected.
 
+## Session-level notification tool (dsh_im_notify)
+
+Any Session in the Host (Web, CLI, background job, subagent) can call the Host-provided `dsh_im_notify` tool to push a message, notification, or option card through a connected bot. The Session does not need to be bound to a chat.
+
+- Every message carries a `🪪 <short session id> · <session name>` tag (for example `🪪 9f3a2c1d · Release check`) so the user can tell which Session is speaking.
+- Target resolution: explicit `targetId` → the **default notification target** chosen in settings → the only saved target. With several targets and no default the tool fails with the candidate list instead of guessing a recipient.
+- With `options` (1–8 choices) Telegram direct chats render inline buttons. A press delivers the choice back to the **originating Session** as a user message (`queue` mode) and posts a receipt in the chat. The option `value` travels with the choice (shown next to the label when they differ).
+- Buttons are only sent to direct chats: groups, topics, and other channels have no keyboard surface that belongs to a single reader, so they receive a numbered text list; a press from a group is always refused so members cannot operate your Session.
+- The default notification target is a single global choice toggled by the "Set as default notification" button on each target row under Settings → IM bots → Delivery settings.
+
+```json
+{
+  "text": "Build finished. Deploy now?",
+  "title": "Release check",
+  "options": [{ "label": "Deploy" }, { "label": "Wait", "value": "wait" }]
+}
+```
+
+The result is `{ sent, targetId, session: { shortId, title }, fallback? }`; `fallback: "text"` means the channel has no buttons and the content was sent as text. HTTP, RPC, and `ctx.dshIm.send()` still deliver text only; cards exist only in this Host tool.
+
 ## Send through HTTP POST
 
 An ordinary external application can call the Host's proactive-delivery endpoint directly:
