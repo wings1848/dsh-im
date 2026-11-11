@@ -246,4 +246,11 @@ export default {
 
   '停止没有生效，请发送 /stop 重试。': 'The stop did not take effect; send /stop to try again.',
 
+  // 主动通知选项卡（非 turn 绑定，n1 命名空间）
+  '✅ 已选择「{choice}」，已转给会话 {session}': '✅ Chose “{choice}”; delivered to Session {session}',
+  '⚠️ 目标会话已结束，未转交': '⚠️ The target Session has ended; the choice was not delivered',
+  '通知回传未启用': 'Delivering the choice back to the Session is not enabled',
+  '该通知只在私聊中可操作。': 'This notification can only be operated in a direct chat.',
+  '[IM 选项卡 · {session}] 已选择：{choice}': '[IM option card · {session}] selected: {choice}',
+
 };

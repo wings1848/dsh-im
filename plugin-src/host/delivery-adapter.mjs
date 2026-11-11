@@ -27,6 +27,22 @@ const CHANNELS = new Set([
   'matrix',
 ]);
 
+// Channels with a native notification-card renderer. Shared token controllers
+// expose the method for every channel they serve, so this list is what decides
+// whether buttons are real; everything else degrades to numbered text.
+const NATIVE_NOTIFICATION_CARD_CHANNELS = new Set(['telegram']);
+
+/**
+ * Notification cards are a control surface for the originating Session, so they
+ * are only rendered where exactly one reader can operate them: a Telegram direct
+ * chat (positive chat id). Groups, topics and other channels get the text form.
+ */
+function privateNotificationTarget(channel, target) {
+  if (!NATIVE_NOTIFICATION_CARD_CHANNELS.has(channel)) return false;
+  const chatId = typeof target?.route?.chatId === 'string' ? target.route.chatId.trim() : '';
+  return target?.kind === 'chat' && /^\d+$/.test(chatId);
+}
+
 export function supportsDeliveryChannel(channel) {
   return CHANNELS.has(channel);
 }
@@ -554,6 +570,50 @@ export function createDeliveryAdapter({
       }
       const result = await coreController.sendProactiveText(botId, normalized, text, options);
       return options.receipt === true ? result : { sent: true };
+    },
+    /**
+     * Deliver one notification card. The buttons and their answer routing are a
+     * channel capability: without it the same card degrades to text with
+     * numbered options instead of failing the notification.
+     */
+    async sendCard(botId, target, card, options = {}) {
+      const normalized = normalizeDeliveryTarget(channel, targetWithoutSessionSync(target));
+      const text = typeof card?.text === 'string' ? card.text : '';
+      const choices = Array.isArray(card?.options) ? card.options : [];
+      if (typeof coreController.sendProactiveText !== 'function') {
+        throw new TypeError('delivery controller cannot send proactive text');
+      }
+      if (!choices.length) {
+        await coreController.sendProactiveText(botId, normalized, text, options);
+        return { sent: true };
+      }
+      const list = () => choices.map((choice, index) => `${index + 1}. ${choice?.label ?? ''}`).join('\n');
+      const fallbackText = () => `${text}\n\n${list()}\n\n（该渠道不支持交互按钮，请在 Web 端处理这张通知）`;
+      if (privateNotificationTarget(channel, normalized)
+        && typeof coreController.sendProactiveCard === 'function') {
+        try {
+          const result = await coreController.sendProactiveCard(botId, normalized, {
+            text,
+            options: choices,
+            origin: card?.origin,
+          }, options);
+          // A channel that knows it cannot render buttons says so instead of
+          // pretending the card was delivered.
+          if (result?.fallback === 'text') {
+            await coreController.sendProactiveText(botId, normalized, fallbackText(), options);
+            return { sent: true, fallback: 'text' };
+          }
+          return { sent: true };
+        } catch (error) {
+          // Losing the keyboard must not lose the notification: degrade to the
+          // text form unless the caller cancelled.
+          if (options?.signal?.aborted || error?.code === 'cancelled') throw error;
+          await coreController.sendProactiveText(botId, normalized, fallbackText(), options);
+          return { sent: true, fallback: 'text' };
+        }
+      }
+      await coreController.sendProactiveText(botId, normalized, fallbackText(), options);
+      return { sent: true, fallback: 'text' };
     },
     async setSessionSync(botId, targetId, enabled) {
       if (typeof workspaces.setDeliveryTargetSessionSync !== 'function') {

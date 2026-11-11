@@ -16,6 +16,12 @@ export function createProductionController(ctx, config = {}, internals = {}) {
     HarnessClient: TelegramHarnessClient,
     Controller: TelegramController,
     Runtime: TelegramRuntime,
+    // A proactive notification card's press is an answer for the Session that
+    // sent it, not a chat command: hand it to the Host's delivery service, which
+    // owns delivering the choice back into that Session.
+    runtimeOptions: (config) => ({
+      onProactiveCardAnswer: (origin, choice) => config.deliveryService?.answerProactiveCard?.(origin, choice),
+    }),
     // The per-group reply rules list chats from the shared group archive.
     controllerGroupHistory: true,
     // Speech recognition is a Host service (@deepseek-ai/dsh-experimental-speech-to-text);

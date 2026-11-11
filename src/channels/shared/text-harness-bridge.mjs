@@ -111,6 +111,16 @@ const MAX_WORKSPACE_CARDS = 50;
 const WORKSPACE_CARD_TTL_MS = 60 * 60 * 1000;
 const WORKSPACE_CARD_NONCE_BYTES = 9;
 
+/**
+ * Cap, TTL and payload limits for proactive notification cards. These are sent
+ * outside any turn (a background job, another Session), so the press carries a
+ * nonce into this bridge's own registry instead of the question bookkeeping.
+ */
+const MAX_PROACTIVE_CARDS = 50;
+const PROACTIVE_CARD_TTL_MS = 60 * 60 * 1000;
+const MAX_PROACTIVE_CARD_OPTIONS = 8;
+const PROACTIVE_CARD_LABEL_LIMIT = 60;
+
 const INTERACTION_RESOLVED_TEXT = '这个问题已在其他客户端处理，无需再次回答。';
 const FILE_ONLY_COMPLETION_TEXT = '任务已完成。';
 
@@ -134,6 +144,41 @@ const PROGRESS_TICK_MS = 10_000;
 
 function cleanText(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Encode a proactive-card press: `n1|<nonce>|<optionIndex>`, well under 64 bytes. */
+function proactiveCardCallbackData(nonce, optionIndex) {
+  return `n1|${nonce}|${optionIndex}`;
+}
+
+/** Parse a press produced by {@link proactiveCardCallbackData}; null for foreign data. */
+function parseProactiveCardCallback(data) {
+  const match = typeof data === 'string'
+    ? /^n1\|([A-Za-z0-9_-]{1,16})\|(\d{1,2})$/u.exec(data)
+    : null;
+  return match ? { nonce: match[1], optionIndex: Number(match[2]) } : null;
+}
+
+/** Validate and normalize the 1..8 single-choice buttons of a proactive card. */
+function normalizeProactiveCardOptions(options) {
+  if (!Array.isArray(options) || options.length === 0
+    || options.length > MAX_PROACTIVE_CARD_OPTIONS) {
+    throw new TypeError(`A proactive card requires 1-${MAX_PROACTIVE_CARD_OPTIONS} options`);
+  }
+  return options.map((option, index) => {
+    const label = cleanText(option?.label);
+    if (!label) throw new TypeError(`Proactive card option ${index} requires a non-empty label`);
+    const value = option?.value;
+    if (value !== undefined && value !== null && typeof value !== 'string') {
+      throw new TypeError(`Proactive card option ${index} value must be a string`);
+    }
+    return {
+      label: label.length > PROACTIVE_CARD_LABEL_LIMIT
+        ? label.slice(0, PROACTIVE_CARD_LABEL_LIMIT)
+        : label,
+      ...(typeof value === 'string' ? { value } : {}),
+    };
+  });
 }
 
 function canClaimInteractionReply(message, pending, senderId) {
@@ -273,6 +318,9 @@ export class TextHarnessBridge {
   // /tail preview messages by nonce, so the "Hide" press can delete the bot's
   // own preview message. Keyed by nonce → { target, providerMessageId }.
   #tailPreviewMessages = new Map();
+  // Proactively delivered notification cards (not tied to a turn): nonce → the
+  // card snapshot, so a press from any chat resolves to the origin it was sent for.
+  #proactiveCards = new Map();
   // Optional channel-supplied approval card controller (see HarnessApprovalQueue's
   // render hook). Null keeps every channel's existing plain-text approval flow.
   #approvalCard;
@@ -290,6 +338,9 @@ export class TextHarnessBridge {
   #welcomeCard;
   // Persists a new display level (a bot-config write owned by the channel).
   #onPresentationLevelChange;
+  // Host-supplied hand-off for a proactive card press; null keeps the card
+  // acknowledging and retiring itself without a receipt.
+  #onProactiveCardAnswer;
   #contextHooks = null;
   // Delivery attempts per message id. A failed turn releases its `markSeen` so
   // the next poll can retry, and this counter is what keeps that from becoming
@@ -336,6 +387,7 @@ export class TextHarnessBridge {
     displayCard = null,
     welcomeCard = null,
     onPresentationLevelChange = null,
+    onProactiveCardAnswer = null,
     approvalTimeoutMs,
     contextHooks = null,
     autoSteerSameSender = false,
@@ -378,6 +430,9 @@ export class TextHarnessBridge {
     this.#welcomeCard = welcomeCard ?? null;
     this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
       ? onPresentationLevelChange
+      : null;
+    this.#onProactiveCardAnswer = typeof onProactiveCardAnswer === 'function'
+      ? onProactiveCardAnswer
       : null;
     // Opt-in follow-up lanes for channels whose groups run on rapid consecutive
     // posts: fold a same sender's burst into one dispatch, and steer that
@@ -1268,6 +1323,126 @@ export class TextHarnessBridge {
       return this.#bot.sendDelivery(target, createTextDeliveryBlock(text, format));
     }
     return this.#bot.sendText(target, text);
+  }
+
+  /**
+   * Deliver a notification card that no turn owns: the press resolves to the
+   * `origin` snapshot kept here, never to a pending interaction. Whether the
+   * card is deliverable is the channel's decision; a refusal throws so the
+   * caller can fall back to text instead of losing the notification.
+   */
+  async sendProactiveCard(target, { text, options, origin } = {}, { signal } = {}) {
+    signal?.throwIfAborted();
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new TypeError('Proactive card text must be a non-empty string');
+    }
+    const normalizedOptions = normalizeProactiveCardOptions(options);
+    const sessionId = origin && typeof origin === 'object' ? cleanText(origin.sessionId) : '';
+    if (!sessionId) throw new TypeError('Proactive card origin requires a sessionId');
+    const nonce = randomBytes(9).toString('base64url');
+    const entry = {
+      origin,
+      options: normalizedOptions,
+      target,
+      providerMessageId: undefined,
+      createdAt: Date.now(),
+    };
+    // Remember before sending: a fast press can beat the Bot API response and
+    // the press only carries the nonce.
+    this.#rememberProactiveCard(nonce, entry);
+    try {
+      const sent = await this.#bot.sendInteractionCard(target, {
+        text,
+        markup: {
+          inline_keyboard: normalizedOptions.map((option, index) => [{
+            text: option.label,
+            callback_data: proactiveCardCallbackData(nonce, index),
+          }]),
+        },
+      });
+      entry.providerMessageId = Array.isArray(sent?.providerMessageIds)
+        ? sent.providerMessageIds.at(-1)
+        : undefined;
+      return sent ?? { providerMessageIds: [] };
+    } catch (error) {
+      this.#proactiveCards.delete(nonce);
+      throw error;
+    }
+  }
+
+  #rememberProactiveCard(nonce, entry) {
+    const now = Date.now();
+    for (const [key, stored] of this.#proactiveCards) {
+      if (now - stored.createdAt > PROACTIVE_CARD_TTL_MS) this.#proactiveCards.delete(key);
+    }
+    this.#proactiveCards.set(nonce, entry);
+    while (this.#proactiveCards.size > MAX_PROACTIVE_CARDS) {
+      const oldest = this.#proactiveCards.keys().next().value;
+      if (oldest === undefined) break;
+      this.#proactiveCards.delete(oldest);
+    }
+  }
+
+  /**
+   * Answer a proactive card press: acknowledge it, retire its keyboard, then
+   * hand the choice to the host callback. A card with no callback still clears
+   * itself, and a failing hand-off reports 「未转交」 instead of throwing into
+   * the polling loop that dispatched the press.
+   */
+  async #handleProactiveCardPress(callback, press) {
+    if (this.#signal?.aborted) return;
+    // A notification card is a control surface for the Session that sent it:
+    // only the direct conversation may operate it, and only senders the command
+    // permission already admits. Group members must not be able to steer
+    // someone else's Session through a forwarded card.
+    if (callback.kind === 'group') return this.#answerInteractionCallback(callback, t('该通知只在私聊中可操作。'));
+    const decision = evaluateInboundAccess(this.#accessPolicy, {
+      conversationType: 'direct',
+      senderIds: [cleanText(callback.senderId)].filter(Boolean),
+      isCommand: true,
+    });
+    if (!decision.allowed) return this.#answerInteractionCallback(callback, t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    const expired = t('⏰ 已过期');
+    const entry = press ? this.#proactiveCards.get(press.nonce) : null;
+    const option = entry && press ? entry.options[press.optionIndex] : undefined;
+    if (!entry || !option || Date.now() - entry.createdAt > PROACTIVE_CARD_TTL_MS) {
+      // Lazy cleanup: an expired, unknown or already-consumed nonce is dropped here.
+      if (entry) this.#proactiveCards.delete(press.nonce);
+      return this.#answerInteractionCallback(callback, expired);
+    }
+    // Claim synchronously, before the first await: a second press must not
+    // deliver the same choice twice.
+    this.#proactiveCards.delete(press.nonce);
+    await this.#answerInteractionCallback(callback);
+    await this.#retireInteractionCard(
+      callback.replyTarget ?? entry.target,
+      String(callback.providerMessageId ?? entry.providerMessageId ?? ''),
+    );
+    if (typeof this.#onProactiveCardAnswer !== 'function') return;
+    const choice = { label: option.label, value: option.value ?? option.label };
+    let outcome = null;
+    try {
+      outcome = await this.#onProactiveCardAnswer(entry.origin, choice);
+    } catch (error) {
+      this.#logger.error?.(
+        `[dsh-im:${this.#descriptor.key}] proactive card answer callback failed:`,
+        error,
+      );
+    }
+    const originLabel = cleanText(entry.origin?.label) || cleanText(entry.origin?.sessionId);
+    const receipt = outcome?.ok === true
+      ? t('✅ 已选择「{choice}」，已转给会话 {session}', { choice: choice.label, session: originLabel })
+      : outcome?.code === 'not-wired'
+        ? t('通知回传未启用')
+        : t('⚠️ 目标会话已结束，未转交');
+    try {
+      await this.#bot.sendText(callback.replyTarget ?? entry.target, receipt);
+    } catch (error) {
+      this.#logger.warn?.(
+        `[dsh-im:${this.#descriptor.key}] could not send a proactive card receipt:`,
+        error?.message ?? error,
+      );
+    }
   }
 
   async #deliverArtifacts(target, replyTo, artifacts = [], baseReceipt) {
@@ -2326,6 +2501,12 @@ export class TextHarnessBridge {
     // namespace before the question bookkeeping so a press can never touch it.
     const workspacePress = this.#workspaceCard?.parse?.(callback.data) ?? null;
     if (workspacePress) return this.#handleWorkspaceCardPress(callback, key, workspacePress);
+    // Proactive notification cards own the `n1|` namespace. They are not
+    // pending questions, so they must route before the question bookkeeping;
+    // a malformed payload in that namespace still gets the expired toast.
+    if (typeof callback?.data === 'string' && callback.data.startsWith('n1|')) {
+      return this.#handleProactiveCardPress(callback, parseProactiveCardCallback(callback.data));
+    }
     // Approval cards own their callback namespace; every other press keeps using
     // the question-card path below. The card acknowledges the press itself (the
     // ack must be the first round-trip), so this branch runs before any other
