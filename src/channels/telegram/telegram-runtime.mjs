@@ -1630,6 +1630,8 @@ export class TelegramRuntime {
   // Persists a `/display` choice through the controller; null on a runtime
   // assembled by a test or tool that owns its own config.
   #onPresentationLevelChange = null;
+  // Host-supplied hand-off for a proactive notification card press.
+  #onProactiveCardAnswer = null;
 
   constructor({
     config,
@@ -1649,6 +1651,9 @@ export class TelegramRuntime {
     // Persists a display level chosen in chat; the controller owns the config
     // write and restarts this runtime with the stored value.
     onPresentationLevelChange = null,
+    // Hands a proactive notification card's press back to the host; null keeps
+    // the card acknowledging itself without a receipt.
+    onProactiveCardAnswer = null,
   }) {
     if (!config || !token || !harness || !state) {
       throw new TypeError('TelegramRuntime requires config, token, Harness, and state');
@@ -1679,6 +1684,9 @@ export class TelegramRuntime {
     this.#createHttpTransport = createHttpTransport;
     this.#onPresentationLevelChange = typeof onPresentationLevelChange === 'function'
       ? onPresentationLevelChange
+      : null;
+    this.#onProactiveCardAnswer = typeof onProactiveCardAnswer === 'function'
+      ? onProactiveCardAnswer
       : null;
     this.#commandCatalog = commandCatalog;
   }
@@ -1728,6 +1736,30 @@ export class TelegramRuntime {
       chatId,
       ...(target.kind === 'topic' ? { messageThreadId } : {}),
     }, text, options);
+  }
+
+  async sendProactiveCard(target, card, options = {}) {
+    if (!this.#status.ready || !this.#bridge) {
+      const error = new Error('Telegram bot is not connected');
+      error.code = 'bot-not-connected';
+      throw error;
+    }
+    const chatIdText = typeof target?.route?.chatId === 'string'
+      ? target.route.chatId.trim() : '';
+    const chatId = Number(chatIdText);
+    const messageThreadId = target?.route?.messageThreadId;
+    if (!/^-?\d+$/.test(chatIdText) || !Number.isSafeInteger(chatId)
+      || (target?.kind !== 'chat' && target?.kind !== 'topic')
+      || (target.kind === 'topic' && (!Number.isSafeInteger(messageThreadId) || messageThreadId <= 0))
+      || (target.kind === 'chat' && messageThreadId !== undefined)) {
+      const error = new TypeError('Invalid Telegram proactive delivery target');
+      error.code = 'invalid-target';
+      throw error;
+    }
+    return this.#bridge.sendProactiveCard({
+      chatId,
+      ...(target.kind === 'topic' ? { messageThreadId } : {}),
+    }, card, options);
   }
 
   async start() {
@@ -1799,6 +1831,7 @@ export class TelegramRuntime {
         // One value drives the stream a turn opens and the frames it may rewrite.
         presentationLevel: presentationLevelFromConfig(this.#config),
         onPresentationLevelChange: this.#onPresentationLevelChange,
+        onProactiveCardAnswer: this.#onProactiveCardAnswer,
         status: this.#status,
         logger: this.#logger,
         replyTimeoutMs: this.#replyTimeoutMs,

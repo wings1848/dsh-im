@@ -148,6 +148,7 @@ export class DeliveryService {
   #adapters = new Map();
   #unavailableSessionSyncChannels;
   #logger;
+  #proactiveAnswerHandler = null;
   dsBot;
 
   constructor({ unavailableSessionSyncChannels = [], dsBot, logger = console } = {}) {
@@ -768,6 +769,84 @@ export class DeliveryService {
         ...(format === 'markdown' ? { format } : {}),
       });
       return { sent: true };
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
+        throw deliveryError('cancelled', 'Request cancelled', { cause: error });
+      }
+      throw publicOperationError(error);
+    }
+  }
+
+  /**
+   * Register the callback that carries a notification-card choice back to the
+   * Session that sent it. The Host provides this; without it cards still render
+   * but clicks answer with a "not wired" receipt instead of failing silently.
+   */
+  setProactiveAnswerHandler(handler) {
+    if (handler !== null && typeof handler !== 'function') {
+      throw new TypeError('Proactive answer handler must be a function');
+    }
+    this.#proactiveAnswerHandler = handler;
+  }
+
+  /**
+   * Deliver one choice from a notification card to its originating Session.
+   * Resolves to `{ ok }` for both outcomes so the channel can show the user a
+   * receipt; a missing Session is a result, not an exception.
+   */
+  async answerProactiveCard(origin, choice, { signal } = {}) {
+    const sessionId = typeof origin?.sessionId === 'string' ? origin.sessionId : '';
+    const label = typeof choice?.label === 'string' ? choice.label.trim() : '';
+    if (!sessionId || !label) throw deliveryError('bad-request', 'Invalid proactive card answer');
+    cancellation(signal);
+    if (!this.#proactiveAnswerHandler) {
+      return { ok: false, code: 'not-wired' };
+    }
+    try {
+      await this.#proactiveAnswerHandler(origin, {
+        label,
+        value: typeof choice?.value === 'string' && choice.value ? choice.value : label,
+      }, { signal });
+      return { ok: true };
+    } catch (error) {
+      cancellation(signal);
+      this.#logger?.warn?.(
+        `[dsh-im] Proactive card answer could not reach its Session: ${error?.message ?? error}`,
+      );
+      return { ok: false, code: 'session-unreachable' };
+    }
+  }
+
+  /**
+   * Deliver a notification card (text + optional single-choice buttons) to one
+   * saved target. Channels without native buttons receive the degraded text
+   * form and report `fallback: 'text'`.
+   */
+  async sendCard(botId, targetId, card, { signal } = {}) {
+    const id = botIdOf(botId);
+    const key = targetIdOf(targetId);
+    const text = typeof card?.text === 'string' ? card.text.trim() : '';
+    if (!text || text.length > 4000) throw deliveryError('bad-request', 'Notification text is required');
+    const options = Array.isArray(card?.options) ? card.options : [];
+    if (options.length > 8
+      || options.some((option) => typeof option?.label !== 'string' || !option.label.trim())) {
+      throw deliveryError('bad-request', 'Invalid notification options');
+    }
+    cancellation(signal);
+    const adapter = await this.#adapterFor(id);
+    if (typeof adapter.sendCard !== 'function') throw deliveryError('capability-unavailable');
+    try {
+      const targets = await adapter.listTargets(id);
+      if (!Array.isArray(targets)) throw new TypeError('Adapter returned invalid targets');
+      const target = targets.find((candidate) => candidate?.targetId === key);
+      if (!target) throw deliveryError('unknown-target', 'Unknown target');
+      cancellation(signal);
+      const result = await adapter.sendCard(id, target, {
+        text,
+        options,
+        ...(card?.origin ? { origin: structuredClone(card.origin) } : {}),
+      }, { signal });
+      return { sent: true, ...(result?.fallback === 'text' ? { fallback: 'text' } : {}) };
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') {
         throw deliveryError('cancelled', 'Request cancelled', { cause: error });

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { installGroupHistoryTools } from '../../src/channels/shared/group-history-access.mjs';
 import { apply as applyDingtalk } from './channels/dingtalk/index.mjs';
 import { apply as applyDiscord } from './channels/discord/index.mjs';
@@ -29,6 +31,10 @@ import { installSessionSyncCoordinator } from './session-sync-coordinator.mjs';
 import { deliverySwitchesOff } from '../../src/channels/shared/delivery-sync-settings.mjs';
 import { getDeliverySyncSettingsStore } from '../../src/channels/shared/delivery-sync-settings-store.mjs';
 import { installSessionTitlePrefix } from './session-title-prefix.mjs';
+import { installImNotifyTool } from './im-notify-tool.mjs';
+import { t } from '../../src/channels/shared/i18n.mjs';
+import { NotifyTargetStore, installNotifyTargetRpc, notifyTargetPath } from './notify-settings.mjs';
+import { modernHarnessApi } from './modern-harness-api.mjs';
 import { installUpdateRpc } from './update-rpc.mjs';
 
 export const name = 'dsh-im-host';
@@ -62,6 +68,7 @@ export function createImHostPlugin(internals = {}) {
   const startDeliveryHttp = internals.installDeliveryHttp ?? installDeliveryHttp;
   const startSessionSync = internals.installSessionSyncCoordinator
     ?? installSessionSyncCoordinator;
+  const startNotifyTarget = internals.installNotifyTargetRpc ?? installNotifyTargetRpc;
   const makeDeliveryService = internals.createDeliveryService ?? createDeliveryService;
   const startFeishu = internals.applyFeishu ?? applyFeishu;
   const startWeixin = internals.applyWeixin ?? applyWeixin;
@@ -105,6 +112,48 @@ export function createImHostPlugin(internals = {}) {
         unavailableSessionSyncChannels: unavailableSessionSyncChannels.map((channel) => channel === 'wecomApp' ? 'wecom-app' : channel),
         dsBot: createDsBotClient(ctx),
       });
+      const notifyStore = new NotifyTargetStore(notifyTargetPath(config));
+      // A notification card's choice is delivered back to the Session that sent
+      // it; `modernHarnessApi` is cached per Host scope, so this shares the
+      // channel-side instance instead of arming a second set of listeners.
+      try {
+        const harness = modernHarnessApi(ctx, { deliveryService });
+        deliveryService.setProactiveAnswerHandler(async (origin, choice) => {
+          // The model-facing value can differ from the button text; keep both so
+          // a Session can branch on a stable id instead of a label.
+          const selected = choice.value && choice.value !== choice.label
+            ? `${choice.label}（${choice.value}）`
+            : choice.label;
+          const response = await harness.sessions.prompt({
+            rpcId: `dsh-im-card-${randomUUID()}`,
+            payload: {
+              sessionId: origin.sessionId,
+              mode: 'queue',
+              content: [{
+                type: 'text',
+                text: t('[IM 选项卡 · {session}] 已选择：{choice}', {
+                  session: origin.label, choice: selected,
+                }),
+              }],
+            },
+          });
+          // The gateway reports business failures inside the envelope instead of
+          // rejecting, so a disposed or archived Session would otherwise look
+          // like a delivered choice.
+          if (response?.result?.ok === false) {
+            const error = new Error(response.result.error?.message ?? 'session prompt rejected');
+            error.code = response.result.error?.code;
+            throw error;
+          }
+        });
+      } catch (error) {
+        // A Host without the modern Typert gateway simply cannot accept answers;
+        // that is a capability gap, not a failure worth warning about.
+        if (!/modern Host Typert gateway/u.test(String(error?.message ?? ''))) {
+          const log = typeof ctx?.logger === 'function' ? ctx.logger(name) : (ctx?.logger ?? console);
+          log?.warn?.('[dsh-im] notification answers are unavailable:', error?.message ?? error);
+        }
+      }
       // The delivery switches are the master for everything that follows a Session
       // through its targets: with both off, `listSessionSyncTargets` answers empty,
       // so neither the coordinator nor a channel's own mirror (Feishu card) sends.
@@ -159,7 +208,7 @@ export function createImHostPlugin(internals = {}) {
         }));
       }
       const activate = async (readyCtx) => {
-        await activateChannels(readyCtx, config, deliveryService);
+        await activateChannels(readyCtx, config, deliveryService, notifyStore);
       };
       if (typeof ctx?.inject === 'function') {
         await ctx.inject(
@@ -178,10 +227,13 @@ export function createImHostPlugin(internals = {}) {
     },
   });
 
-  async function activateChannels(ctx, config, deliveryService) {
+  async function activateChannels(ctx, config, deliveryService, notifyStore) {
     // Bind the bot message language before any channel connects, so the first
     // command menu a platform stores is already in the interface language.
     const hostLanguage = startHostLanguage(ctx, config);
+    const logger = typeof ctx?.logger === 'function'
+      ? ctx.logger(name)
+      : (ctx?.logger ?? console);
     await hostLanguage?.ready;
     const startTitlePrefix = (titleCtx) => {
       // The installer owns its cleanup through ctx.effect(). Cordis startup
@@ -200,14 +252,18 @@ export function createImHostPlugin(internals = {}) {
       ctx.inject(['tools', 'systemPrompt'], (artifactCtx) => {
         installOutboundArtifactTool(artifactCtx);
         installGroupHistoryTools(artifactCtx);
+        installImNotifyTool(artifactCtx, {
+          deliveryService,
+          store: notifyStore,
+          logger: typeof artifactCtx?.logger === 'function'
+            ? artifactCtx.logger('dsh-im:notify') : logger,
+        });
       });
     } else {
       installOutboundArtifactTool(ctx);
       installGroupHistoryTools(ctx);
+      installImNotifyTool(ctx, { deliveryService, store: notifyStore, logger });
     }
-    const logger = typeof ctx?.logger === 'function'
-      ? ctx.logger(name)
-      : (ctx?.logger ?? console);
     try {
       startInjectedContext(ctx, { logger });
     } catch (error) {
@@ -230,6 +286,15 @@ export function createImHostPlugin(internals = {}) {
         startSidebarSettings(ctx, { config });
       } catch (error) {
         logger.error?.('[dsh-im] failed to activate sidebar settings; continuing with channels', error);
+      }
+      // The registry is absent on Hosts that do not expose management RPC yet;
+      // that is a capability limit, not an activation failure worth logging.
+      if (typeof ctx?.connection?.fetch?.register === 'function') {
+        try {
+          startNotifyTarget(ctx, { config });
+        } catch (error) {
+          logger.error?.('[dsh-im] failed to activate default notify target settings; continuing with channels', error);
+        }
       }
       try {
         startInboundTtl(ctx, { config });

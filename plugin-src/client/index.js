@@ -67,6 +67,7 @@ import { BotSettingsContext } from './channel-card-meta.js';
 import {
   DELIVERY_RPC_CHANNEL,
   DeliveryTargetSettingsPage,
+  NOTIFY_RPC_CHANNEL,
 } from './delivery-settings.js';
 import {
   GLOBAL_SETTINGS_RPC_CHANNEL,
@@ -236,6 +237,7 @@ export function IMSettingsTab({
   officeRpcCall,
   updateRpcCall,
   deliveryRpcCall,
+  notifyRpcCall,
   globalSettingsRpcCall,
   deliverySyncRpcCall,
   languageRpcCall,
@@ -290,6 +292,7 @@ export function IMSettingsTab({
     officeRpcCall,
     updateRpcCall,
     deliveryRpcCall,
+    notifyRpcCall,
     globalSettingsRpcCall,
     deliverySyncRpcCall,
     languageRpcCall,
@@ -313,6 +316,7 @@ export function IMSettingsTab({
     officeRpcCall,
     qqRpcCall,
     reportLoopbackRecovery,
+    notifyRpcCall,
     slackRpcCall,
     telegramRpcCall,
     updateRpcCall,
@@ -427,6 +431,7 @@ export function IMSettingsTab({
               channel: active.id,
               account: deliverySettings,
               rpcCall: rpcCalls.deliveryRpcCall,
+              notifyRpcCall: rpcCalls.notifyRpcCall,
               accessRpcCall: rpcCalls[`${active.id}RpcCall`],
               onBack: () => setDeliverySettings(null),
             })
@@ -562,6 +567,8 @@ export function apply(ctx) {
     managementRpc(ctx.connection, UPDATE_RPC_CHANNEL, endpoint, payload, signal);
   const deliveryRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, DELIVERY_RPC_CHANNEL, endpoint, payload, signal);
+  const notifyRpcCall = (endpoint, payload, signal) =>
+    managementRpc(ctx.connection, NOTIFY_RPC_CHANNEL, endpoint, payload, signal);
   const globalSettingsRpcCall = (endpoint, payload, signal) =>
     managementRpc(ctx.connection, Object.values(SIDEBAR_SETTINGS_ENDPOINTS).includes(endpoint)
       ? SIDEBAR_SETTINGS_RPC_CHANNEL : GLOBAL_SETTINGS_RPC_CHANNEL, endpoint, payload, signal);
@@ -592,6 +599,7 @@ export function apply(ctx) {
     matrixRpcCall,
     updateRpcCall,
     deliveryRpcCall,
+    notifyRpcCall,
     globalSettingsRpcCall,
     languageRpcCall,
     deliverySyncRpcCall,
