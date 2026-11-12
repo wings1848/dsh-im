@@ -22,6 +22,7 @@ import {
   enhanceContextContent,
 } from './context-enhancement.mjs';
 import {
+  isReadOnlyWorkspaceCommand,
   isWorkspaceCommand,
   runWorkspaceCommand,
   workspaceSwitchFailureText,
@@ -33,6 +34,8 @@ import {
   workspaceTail,
 } from './status-command.mjs';
 import { runCompactCommand } from './compact-command.mjs';
+import { runStatusCommand } from './status-command.mjs';
+import { isCompactCommand, runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isResetCommand, runResetCommand } from './reset-command.mjs';
 import { isMenuCommand, runMenuCommand } from './menu-command.mjs';
@@ -584,6 +587,57 @@ export class TextHarnessBridge {
       && await this.#presentClearConfirmation(normalized, messageId, key)) {
       this.#acceptedMessageIds.delete(messageId);
       return;
+    }
+    // `/menu` is a Telegram-only hub: it renders a summary plus entries into the
+    // pickers this channel already has. An unrenderable or refused card falls
+    // through to the plain /help text, so the command is never a dead end.
+    if (!collectingBatch
+      && isMenuCommand(text)
+      && (normalized.kind !== 'group' || normalized.addressed === true)
+      && await this.#presentMenuHub(normalized, messageId, key)) {
+      return;
+    }
+    // A channel-local command needs no model turn: answering it here keeps a
+    // long-running turn from parking `/status`, `/workspace` or `/display`
+    // behind the per-conversation queue. Identity-changing forms decline inside
+    // the helper and keep their ordinary queue position.
+    const immediateKind = collectingBatch ? null : this.#localCommandKind(text, {
+      hasImages: hasInboundImages(normalized),
+      hasFiles: hasInboundFiles(normalized),
+      immediate: true,
+    });
+    if (immediateKind !== null
+      && (normalized.kind !== 'group' || normalized.addressed === true)) {
+      let localTask;
+      localTask = this.#handleLocalCommand(normalized, messageId, key, {
+        target: normalized.replyTarget,
+        text,
+        hasImages: hasInboundImages(normalized),
+        hasFiles: hasInboundFiles(normalized),
+        recorded: false,
+        immediate: true,
+      }).then((handled) => {
+        if (handled) this.#acceptedMessageIds.delete(messageId);
+        return handled;
+      }).catch(async (error) => {
+        if (this.#signal?.aborted || error?.code === 'turn-stopped') {
+          normalized.statusReaction?.clear();
+          return true;
+        }
+        normalized.statusReaction?.error();
+        this.#status.lastError = error?.message ?? String(error);
+        const failure = setLastMessageFailure(this.#status, error);
+        this.#logger.error?.(
+          `[dsh-im:${this.#descriptor.key}] failed to process a local command [${failure.referenceId}]:`,
+          messageFailureDiagnostic(error, failure),
+        );
+        await this.#bot.sendText(normalized.replyTarget, messageFailureText(failure)).catch(() => undefined);
+        return true;
+      }).finally(() => {
+        this.#commandTasks.delete(localTask);
+      });
+      this.#commandTasks.add(localTask);
+      if (await localTask) return;
     }
     const commandRunner = collectingBatch ? null
       : isMenuCommand(text) ? runMenuCommand
@@ -1304,6 +1358,178 @@ export class TextHarnessBridge {
     };
   }
 
+  /**
+   * Classify a message for the channel-local command lanes.
+   *
+   * One decision point for both callers: `#process` (after the queue) and
+   * `#acceptAcceptedMessage` (the busy lane, `immediate`). Returning null means
+   * the message is not a local command this lane owns, so it continues down the
+   * ordinary route.
+   *
+   * `immediate` narrows the set to commands that cannot change which Session or
+   * workspace the conversation uses: a workspace switch, `/new` and `/compact`
+   * keep their queue position behind an in-flight turn.
+   */
+  #localCommandKind(text, { hasImages = false, hasFiles = false, immediate = false } = {}) {
+    if (hasImages || hasFiles) return null;
+    const command = text.toLowerCase();
+    if (isBareCommand(command, '/help')) return 'help';
+    if (isBareCommand(command, '/status')) return 'status';
+    if (isStartCommand(text)) return 'start';
+    if (isBareCommand(command, '/display') && this.#supportsDisplayCommand()) return 'display';
+    if (command === '/session') return 'session';
+    if (isWorkspaceCommand(text)) {
+      return !immediate || isReadOnlyWorkspaceCommand(text) ? 'workspace' : null;
+    }
+    if (immediate) return null;
+    if (isBareCommand(command, '/new')) return 'new';
+    if (isCompactCommand(text)) return 'compact';
+    return null;
+  }
+
+  /**
+   * Answer one channel-local command without the model.
+   *
+   * Returns true when the message was consumed, false when it is not a local
+   * command this lane may handle. `recorded` says the caller already marked the
+   * message seen (the queued path does that before it knows the content);
+   * otherwise this method marks it only once it knows the message is consumed.
+   */
+  async #handleLocalCommand(message, messageId, conversationKey, {
+    target, text, hasImages, hasFiles, recorded = true, immediate = false,
+  } = {}) {
+    const kind = this.#localCommandKind(text, { hasImages, hasFiles, immediate });
+    if (kind === null) return false;
+    if (!recorded) {
+      if (this.#state.hasSeen(messageId)) return true;
+      await this.#state.markSeen(messageId);
+      this.#status.messagesReceived += 1;
+      this.#status.lastMessageAt = new Date().toISOString();
+    }
+    const command = text.toLowerCase();
+    if (kind === 'help') {
+      if (hasExtraArguments(command, '/help')) {
+        await this.#bot.sendText(target, t('用法：/help（不带参数）'));
+        return true;
+      }
+      // A keyboard channel gets the sectioned card; the exact text below stays
+      // the answer everywhere else (and when the card cannot be delivered).
+      if (await this.#presentHelpCard(target, conversationKey)) return true;
+      await this.#bot.sendText(target, [
+        t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
+        '',
+        t('直接发送文字、图片或文件即可继续当前会话。'),
+        ...commandHelpLines(this.#descriptor.key),
+      ].join('\n'));
+      return true;
+    }
+    if (kind === 'status') {
+      if (hasExtraArguments(command, '/status')) {
+        await this.#bot.sendText(target, t('用法：/status（不带参数）'));
+        return true;
+      }
+      const status = await runStatusCommand({
+        descriptor: this.#descriptor,
+        harness: this.#harness,
+        state: this.#state,
+        conversationKey,
+        signal: this.#signal,
+      });
+      // A keyboard channel gets the actionable card; the text below stays the
+      // answer everywhere else (and when the card cannot be delivered).
+      if (status.statusSnapshot
+        && await this.#presentStatusCard(
+          target, conversationKey, this.#withDisplayLevel(status.statusSnapshot),
+        )) return true;
+      await this.#bot.sendText(target, status.message);
+      return true;
+    }
+    if (kind === 'start') {
+      // `/start` is the first thing Telegram sends a new reader; answer it with
+      // a greeting instead of forwarding the literal string to the model.
+      if (await this.#presentWelcomeCard(target, conversationKey)) return true;
+      await this.#bot.sendText(target, t('已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。'));
+      return true;
+    }
+    if (kind === 'display') {
+      // `/display` is the one place a reader tunes how much of a turn the chat
+      // shows. A keyboard channel gets three buttons; every other channel gets
+      // the same three names as text, so the setting exists everywhere.
+      await this.#runDisplayCommand({ target, command, conversationKey });
+      return true;
+    }
+    if (kind === 'new') {
+      if (hasExtraArguments(command, '/new')) {
+        await this.#bot.sendText(target, t('用法：/new（不带参数）'));
+        return true;
+      }
+      const receipt = await startNewConversation({ state: this.#state, harness: this.#harness, key: conversationKey });
+      if (this.#contextHooks?.onSessionCleared) {
+        try {
+          await this.#contextHooks.onSessionCleared(conversationKey);
+        } catch (error) {
+          // The cleared session is already done; a failed context reset must not block the command.
+          this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] failed to reset context anchors after /new:`, error?.message ?? error);
+        }
+      }
+      await this.#bot.sendText(target, `${receipt}\n${t('请发送你的问题。')}`);
+      return true;
+    }
+    if (kind === 'compact') {
+      const compactCommand = await runCompactCommand(
+        text,
+        this.#harness,
+        this.#state,
+        conversationKey,
+        { signal: this.#signal },
+      );
+      if (compactCommand) {
+        await this.#bot.sendText(target, compactCommand.message);
+        return true;
+      }
+      return false;
+    }
+    // Bare /session opens the same picker as /sessionlist when the channel can
+    // carry a keyboard. It goes through the list command so the picker and its
+    // text fallback share one enumeration; the historical usage text stays the
+    // answer for a channel without a card (the workspace lane below answers).
+    if (kind === 'session'
+      && this.#sessionCard && typeof this.#bot.sendInteractionCard === 'function') {
+      const pickerCommand = await runWorkspaceCommand('/sessionlist', this.#harness, conversationKey);
+      if (pickerCommand && await this.#presentSessionCommand(target, pickerCommand, conversationKey)) {
+        return true;
+      }
+      if (pickerCommand) {
+        for (const reply of pickerCommand.messages ?? [pickerCommand.message]) {
+          await this.#bot.sendText(target, reply);
+        }
+        return true;
+      }
+    }
+    const workspaceCommand = await runWorkspaceCommand(text, this.#harness, conversationKey);
+    if (await this.#presentWorkspaceResult(target, workspaceCommand, conversationKey)) return true;
+    return false;
+  }
+
+  /**
+   * Present whatever a workspace command produced: the workspace picker, the
+   * conversation-workspace card, the session picker, or the split text. One
+   * place so the busy lane and the ordinary queue cannot drift.
+   */
+  async #presentWorkspaceResult(target, workspaceCommand, key) {
+    if (!workspaceCommand) return false;
+    if (await this.#presentWorkspaceCommand(target, workspaceCommand, key)) return true;
+    if (workspaceCommand.conversationWorkspaceListing
+      && await this.#presentConvCard(
+        target, workspaceCommand.conversationWorkspaceListing, key,
+      )) return true;
+    if (await this.#presentSessionCommand(target, workspaceCommand, key)) return true;
+    for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
+      if (reply) await this.#bot.sendText(target, reply);
+    }
+    return true;
+  }
+
   async #process(message, messageId, senderId, conversationKey, {
     alreadyRecorded = false,
   } = {}) {
@@ -1356,170 +1582,9 @@ export class TextHarnessBridge {
         await this.#bot.sendText(target, t('目前支持文字、图片和文件消息。'));
         return;
       }
-      const command = text.toLowerCase();
-      if (!hasImages && !hasFiles && isBareCommand(command, '/help')) {
-        if (hasExtraArguments(command, '/help')) {
-          await this.#bot.sendText(target, t('用法：/help（不带参数）'));
-          return;
-        }
-        // A keyboard channel gets the sectioned card; the exact text below stays
-        // the answer everywhere else (and when the card cannot be delivered).
-        if (await this.#presentHelpCard(target, conversationKey)) return;
-        await this.#bot.sendText(target, [
-          t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
-          '',
-          t('直接发送文字、图片或文件即可继续当前会话。'),
-          ...commandHelpLines(this.#descriptor.key, availableCommandCatalog(SHARED_COMMAND_CATALOG, {
-            supportsFork: this.#harness.supportsSessionFork?.() ?? true,
-          })),
-        ].join('\n'));
-        return;
-      }
-      if (!hasImages && !hasFiles && isBareCommand(command, '/status')) {
-        if (hasExtraArguments(command, '/status')) {
-          await this.#bot.sendText(target, t('用法：/status（不带参数）'));
-          return;
-        }
-        const status = await runStatusCommand({
-          descriptor: this.#descriptor,
-          harness: this.#harness,
-          state: this.#state,
-          conversationKey,
-          signal: this.#signal,
-        });
-        // A keyboard channel gets the actionable card; the text below stays the
-        // answer everywhere else (and when the card cannot be delivered).
-        if (status.statusSnapshot
-          && await this.#presentStatusCard(
-            target, conversationKey, this.#withDisplayLevel(status.statusSnapshot),
-          )) return;
-        await this.#bot.sendText(target, status.message);
-        return;
-      }
-      // `/start` is the first thing Telegram sends a new reader; answer it with
-      // a greeting instead of forwarding the literal string to the model.
-      if (!hasImages && !hasFiles && isStartCommand(text)) {
-        if (await this.#presentWelcomeCard(target, conversationKey)) return;
-        await this.#bot.sendText(target, t('已连接 DeepSeek Harness。直接发消息即可，发送 /help 查看全部命令。'));
-        return;
-      }
-      // `/display` is the one place a reader tunes how much of a turn the chat
-      // shows. A keyboard channel gets three buttons; every other channel gets
-      // the same three names as text, so the setting exists everywhere.
-      if (!hasImages && !hasFiles && isBareCommand(command, '/display')
-        && this.#supportsDisplayCommand()) {
-        await this.#runDisplayCommand({ target, command, conversationKey });
-        return;
-      }
-      // Bare /session opens the same picker as /sessionlist when the channel can
-      // carry a keyboard. It goes through the list command so the picker and its
-      // text fallback share one enumeration; the historical usage text stays the
-      // answer for a channel without a card (the dispatch below is skipped).
-      if (!hasImages && !hasFiles && command === '/session'
-        && this.#sessionCard && typeof this.#bot.sendInteractionCard === 'function') {
-        const pickerCommand = await runWorkspaceCommand('/sessionlist', this.#harness, conversationKey);
-        if (pickerCommand && await this.#presentSessionCommand(
-          target, pickerCommand, conversationKey,
-        )) return;
-        if (pickerCommand) {
-          for (const reply of pickerCommand.messages ?? [pickerCommand.message]) {
-            await this.#bot.sendText(target, reply);
-          }
-          return;
-        }
-      }
-      const workspaceCommand = !hasImages && !hasFiles
-        ? await runWorkspaceCommand(text, this.#harness, conversationKey)
-        : null;
-      if (workspaceCommand && await this.#presentWorkspaceCommand(
-        target, workspaceCommand, conversationKey,
-      )) return;
-      // `/conv` is the *conversation-scoped* workspace; its card is deliberately
-      // separate from `/ws` (which changes the bot default).
-      if (workspaceCommand?.conversationWorkspaceListing
-        && await this.#presentConvCard(
-          target, workspaceCommand.conversationWorkspaceListing, conversationKey,
-        )) return;
-      if (workspaceCommand && await this.#presentSessionCommand(
-        target, workspaceCommand, conversationKey,
-      )) return;
-      if (workspaceCommand) {
-        for (const reply of workspaceCommand.messages ?? [workspaceCommand.message]) {
-          await this.#bot.sendText(target, reply);
-        }
-        return;
-      }
-      if (!hasImages && !hasFiles && isNewCommand(text)) {
-        const receipt = await startNewConversation({
-          state: this.#state,
-          harness: this.#harness,
-          key: conversationKey,
-          title: newCommandTitle(text),
-        });
-        if (this.#contextHooks?.onSessionCleared) {
-          try {
-            await this.#contextHooks.onSessionCleared(conversationKey);
-          } catch (error) {
-            // The cleared session is already done; a failed context reset must not block the command.
-            this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] failed to reset context anchors after /new:`, error?.message ?? error);
-          }
-        }
-        await this.#bot.sendText(target, `${receipt}\n${t('请发送你的问题。')}`);
-        return;
-      }
-      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
-        const result = await runSessionNavCommand(
-          text,
-          this.#harness,
-          this.#state,
-          conversationKey,
-          { signal: this.#signal, isDirect: message.kind === 'direct' },
-        );
-        if (result) {
-          await this.#presentSessionNavResult(target, result);
-          if (result.askText) {
-            // /go N <text>, /prev <text>, /next <text>: switch, then submit the
-            // remainder through the ordinary prompt path. Never await the queued
-            // follow-up here — we are inside the queue's own job, so awaiting the
-            // next job deadlocks. The queue runs it right after this job returns.
-            const followUp = this.#enqueueMessage(
-              {
-                ...message,
-                controlText: result.askText,
-                content: result.askText,
-                images: undefined,
-                files: undefined,
-                replyTo: undefined,
-                batchSubmission: undefined,
-              },
-              `${messageId}-ask`,
-              senderId,
-              conversationKey,
-            );
-            followUp.catch((error) => {
-              this.#logger.warn?.(
-                `[dsh-im:${this.#descriptor.key}] follow-up ask after a nav command failed:`,
-                error?.message ?? error,
-              );
-              this.#bot.sendText(target, t('切换后的提问发送失败，请重试。')).catch(() => undefined);
-            });
-          }
-        }
-        return;
-      }
-      const compactCommand = !hasImages && !hasFiles
-        ? await runCompactCommand(
-            text,
-            this.#harness,
-            this.#state,
-            conversationKey,
-            { signal: this.#signal },
-          )
-        : null;
-      if (compactCommand) {
-        await this.#bot.sendText(target, compactCommand.message);
-        return;
-      }
+      if (await this.#handleLocalCommand(message, messageId, conversationKey, {
+        target, text, hasImages, hasFiles, recorded: true, immediate: false,
+      })) return;
 
       await this.#bot.sendTyping?.(target).catch((error) => {
         this.#logger.warn?.(`[dsh-im:${this.#descriptor.key}] typing indicator failed:`, error);
@@ -2793,6 +2858,24 @@ export class TextHarnessBridge {
     }
   }
 
+  /**
+   * Why a picker press may not change this conversation's identity right now.
+   *
+   * A typed `/workspace <path>`, `/session <id>` or `/new` keeps its queue
+   * position behind a running turn, so the buttons that replay the same commands
+   * must not become a side door around that queue. Returns the notice to show, or
+   * null when the conversation is idle enough to switch.
+   */
+  #identityChangeBlockedText(key) {
+    const busy = this.#queues.has(key)
+      || this.#pendingInteractions.has(key)
+      || this.#approvals.hasPending(key)
+      || this.#batches.status(key).phase !== 'idle';
+    return busy
+      ? t('当前任务仍在运行，请先停止任务或等待任务完成后再执行此操作。')
+      : null;
+  }
+
   /** Answer a workspace press through the current card snapshot. */
   async #handleWorkspaceCardPress(callback, key, press) {
     if (this.#signal?.aborted) return;
@@ -2823,6 +2906,8 @@ export class TextHarnessBridge {
       isCommand: true,
     });
     if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    const blocked = this.#identityChangeBlockedText(key);
+    if (blocked) return notice(blocked);
     const path = entry.listing?.paths?.[press.index];
     if (typeof path !== 'string') return notice(expired);
     // Claim synchronously, before the first await: a second press arriving
@@ -3804,6 +3889,8 @@ export class TextHarnessBridge {
       isCommand: true,
     });
     if (!decision.allowed) return notice(t(COMMAND_PERMISSION_DENIED_MESSAGE));
+    const blocked = this.#identityChangeBlockedText(key);
+    if (blocked) return notice(blocked);
     try {
       await this.#sessionCard.handlePress(callback, {
         key,

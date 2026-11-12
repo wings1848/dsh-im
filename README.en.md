@@ -317,7 +317,7 @@ A binding change is announced synchronously, so a subscriber keeps its own sessi
 | `/menu`, `/m` | Open the Feishu, DingTalk or Enterprise WeChat interactive menu. DingTalk arranges session, workspace, preset and model dropdowns in two columns; selections apply immediately and update the same card. WeCom requires Apply after selecting; open its menu explicitly with `/m` or `/menu`. Entering a direct chat does not open it automatically. Action buttons return their result without sending the menu again. Menus include new session, stop, compact, clear context, status and help buttons. |
 | QQ `/menu`, `/m` | Open a button and numbered menu for session selection, workspace, mode/preset, model, new session, session list, stop, compact, steering, archived-session visibility, status and help. Lists support pagination; reply with a number when buttons are unavailable. Menus are scoped to the chat and actor and expire after 15 minutes or restart. Ordinary messages exit number selection; questions, approvals and batch input retain priority. |
 | `/new` | Unbind the current chat so its next ordinary message starts a new Harness Session. |
-| `/status` | Check the connection between the current bot and DeepSeek Harness. |
+| `/status` | Check the connection between the current bot and DeepSeek Harness; when the Host reports usage, it also shows context occupancy, cache-hit rate and accumulated tokens for this Session. |
 | `/version` | Show the version of the running dsh-im plugin. |
 | `/models` | List every currently configured model with a number. |
 | `/model` | Show the model and reasoning effort used by the Session bound to this chat. |

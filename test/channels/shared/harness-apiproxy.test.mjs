@@ -378,6 +378,48 @@ test('history reading uses only the existing read RPC in both Host connection mo
   }
 });
 
+test('session projections use only the exact read RPC in both Host connection modes', async () => {
+  const value = {
+    kind: 'sequenced',
+    asOfSeq: 4,
+    values: {
+      tokenUsage: { uncachedInputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 0 },
+    },
+  };
+  for (const mode of ['local', 'http']) {
+    const calls = [];
+    const client = localClient({
+      sessions: {
+        projections({ rpcId, payload }, signal) {
+          assert.equal(mode, 'local');
+          assert.ok(signal instanceof AbortSignal);
+          calls.push(payload);
+          return { rpcId, result: { ok: true, value } };
+        },
+      },
+    }, mode === 'http' ? {
+      baseUrl: 'http://127.0.0.1:1234',
+      fetchImpl: async (url, options) => {
+        assert.equal(url.pathname, '/api/session.projections');
+        const request = JSON.parse(options.body);
+        calls.push(request.payload);
+        return {
+          ok: true,
+          json: async () => ({
+            type: 'server-response',
+            rpcId: request.rpcId,
+            result: { ok: true, value },
+          }),
+        };
+      },
+    } : {});
+    assert.deepEqual(await client.readSessionProjections('cold-session'), value);
+    assert.deepEqual(calls, [{ sessionId: 'cold-session' }]);
+    await assert.rejects(client.readSessionProjections(''), TypeError);
+    assert.equal(calls.length, 1, 'invalid input must not make another RPC');
+  }
+});
+
 test('history reads preserve cancellation, timeout and missing-session errors without retrying', async () => {
   let calls = 0;
   const client = localClient({ sessions: {

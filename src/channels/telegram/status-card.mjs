@@ -1,5 +1,6 @@
 import { t } from '../shared/i18n.mjs';
 import { presentationLevelLabel } from '../shared/presentation-level.mjs';
+import { statusUsageLines } from '../shared/status-command.mjs';
 import {
   ACTION_CARD_STATUS,
   ActionCardRegistry,
@@ -140,6 +141,9 @@ export function statusCardText(snapshot = {}) {
     lines.push(t('显示挡位：{level}', { level: presentationLevelLabel(snapshot.presentationLevel) }));
   }
   if (running === true) lines.push(t('运行中任务：有（发送 /stop 可停止）'));
+  // The card is a re-presentation of the text status: the usage readings come
+  // from the same formatter, in the same order, so the two can never disagree.
+  lines.push(...statusUsageLines(snapshot?.usage));
   return lines.join('\n');
 }
 

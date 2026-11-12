@@ -148,6 +148,23 @@ test('a running task is called out with how to stop it', () => {
   assert.match(text, /运行中任务：有（发送\/stop 可停止）|运行中任务：有（发送 \/stop 可停止）/u);
 });
 
+test('the card carries the same usage readings as the text status', () => {
+  const text = statusCardText({
+    ...SNAPSHOT,
+    usage: {
+      contextUsed: 123_400,
+      contextWindow: 200_000,
+      cacheReadTokens: 1_200_000,
+      uncachedInputTokens: 300_000,
+      cacheWriteTokens: 0,
+      outputTokens: 34_567,
+    },
+  });
+  assert.match(text, /上下文占用：~123k \/ 200k（62%）/u);
+  assert.match(text, /缓存命中率：80%（缓存读取 1\.2M \/ 输入 1\.5M）/u);
+  assert.match(text, /本会话 Token：输入 1\.5M \/ 输出 34\.6k/u);
+});
+
 test('every button is attributable and fits the callback budget', () => {
   const card = renderStatusCard(SNAPSHOT, 'abcd1234EFGH');
   const buttons = card.markup.inline_keyboard.flat();

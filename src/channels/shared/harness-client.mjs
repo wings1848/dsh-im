@@ -1491,6 +1491,18 @@ export class HarnessClient {
     }, timeoutMs, options);
   }
 
+  /**
+   * Read one Session's exact projections without activating it.
+   *
+   * The status surfaces use only `tokenUsage` and `contextPressure`, but the
+   * value is the Host's complete projection snapshot: a channel that later wants
+   * another key must not need a new RPC. `null` means the Session is absent.
+   */
+  async readSessionProjections(sessionId, { timeoutMs = 5_000, ...options } = {}) {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('sessionId is required');
+    return this.rpc('session.projections', { sessionId }, timeoutMs, options);
+  }
+
   async #isSessionArchived(sessionId, options = {}) {
     const value = await this.rpc('workspace.list', {}, 30_000, options);
     if (!Array.isArray(value?.archivedSessionIds)

@@ -131,6 +131,52 @@ test('status reports connection, workspace, session, model, preset and a running
   ]);
 });
 
+test('status reads context occupancy, cache hit rate and session tokens', async () => {
+  const text = await askStatus({
+    harness: harnessFixture({
+      session: {
+        async readProjections() {
+          return {
+            kind: 'sequenced',
+            asOfSeq: 42,
+            values: {
+              tokenUsage: {
+                uncachedInputTokens: 300_000,
+                outputTokens: 34_567,
+                cacheReadTokens: 1_200_000,
+                cacheWriteTokens: 0,
+              },
+              contextPressure: {
+                pressureTokens: 120_000,
+                projectedTokens: 123_400,
+                contextWindow: 200_000,
+              },
+            },
+          };
+        },
+      },
+    }),
+    state: stateWithSession(SESSION_ID),
+  });
+  const lines = text.split('\n');
+  assert.ok(lines.includes('上下文占用：~123k / 200k（62%）'), text);
+  assert.ok(lines.includes('缓存命中率：80%（缓存读取 1.2M / 输入 1.5M）'), text);
+  assert.ok(lines.includes('本会话 Token：输入 1.5M / 输出 34.6k'), text);
+});
+
+test('status omits usage when the Host cannot report it', async () => {
+  const text = await askStatus({
+    harness: harnessFixture({
+      session: {
+        async readProjections() { throw new Error('projections unavailable'); },
+      },
+    }),
+    state: stateWithSession(SESSION_ID),
+  });
+  assert.doesNotMatch(text, /上下文占用|缓存命中率|本会话 Token/u,
+    'an optional projection read never adds a broken line');
+});
+
 test('status stays one readable message when the chat has no session or task', async () => {
   const text = await askStatus({
     harness: harnessFixture({
