@@ -363,4 +363,11 @@ export default {
   '{name} 执行失败，请稍后重试。': '{name} failed; please try again later.',
   '当前机器人暂不支持 {name} 命令。': 'This bot does not support the {name} command yet.',
   '当前 Host 未注册 {name} 命令。': 'The current Host has not registered the {name} command.',
+  // status-command.mjs usage readings
+  '上下文占用：~{used} / {window}（{percent}%）': 'Context: ~{used} / {window} ({percent}%)',
+  '上下文占用：~{used}': 'Context: ~{used}',
+  '缓存命中率：{percent}%（缓存读取 {read} / 输入 {input}）':
+    'Cache hit: {percent}% (cached input {read} / input {input})',
+  '本会话 Token：输入 {input} / 输出 {output}':
+    'Session tokens: input {input} / output {output}',
 };

@@ -43,6 +43,33 @@ test('modern permission adapter reads structured live values without activating 
   assert.ok(calls.every((call) => call.signal instanceof AbortSignal));
 });
 
+test('modern usage adapter reads the exact session projections shape', async () => {
+  const calls = [];
+  const value = {
+    kind: 'sequenced',
+    asOfSeq: 9,
+    values: {
+      tokenUsage: { uncachedInputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 0 },
+      contextPressure: { projectedTokens: 1_000, contextWindow: 2_000 },
+    },
+  };
+  const { ctx } = fakeContext({
+    stream() { throw new Error('Usage reads do not need a stream'); },
+    async invoke(request) {
+      calls.push(request);
+      assert.equal(request.namespace, 'session');
+      assert.equal(request.method, 'projections');
+      assert.deepEqual(request.args, { request: { sessionId: 'session' } });
+      return value;
+    },
+  });
+  const harness = new HarnessClient({ ...harnessConnection(ctx), workspace: '/workspace', autostart: false });
+  assert.deepEqual(await harness.readSessionProjections('session'), value);
+  assert.equal(calls.length, 1);
+  await assert.rejects(harness.readSessionProjections(''), TypeError);
+  assert.equal(calls.length, 1, 'invalid input must not make another RPC');
+});
+
 function fakeContext(gateway) {
   const listeners = new Map();
   const root = {};

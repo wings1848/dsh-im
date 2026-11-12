@@ -265,6 +265,9 @@ class ModernHarnessApi {
       permissions: (request, signal) => rpcResult(request, () => this.#sessionPermissions(
         request.payload.sessionId, signal,
       )),
+      projections: (request, signal) => rpcResult(request, () => this.#invoke(
+        'session', 'projections', { request: { sessionId: request.payload.sessionId } }, signal,
+      )),
       selectModel: (request, signal) => rpcResult(request, () => this.#invoke(
         'session', 'selectModel', { request: request.payload }, signal,
       )),
