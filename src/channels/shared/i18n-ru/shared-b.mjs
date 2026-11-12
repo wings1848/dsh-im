@@ -327,4 +327,11 @@ export default {
   '{name} 执行失败，请稍后重试。': 'Не удалось выполнить {name}; повторите попытку позже.',
   '当前机器人暂不支持 {name} 命令。': 'Этот бот пока не поддерживает команду {name}.',
   '当前 Host 未注册 {name} 命令。': 'Текущий Host не зарегистрировал команду {name}.',
+  // status-command.mjs usage readings
+  '上下文占用：~{used} / {window}（{percent}%）': 'Контекст: ~{used} / {window} ({percent}%)',
+  '上下文占用：~{used}': 'Контекст: ~{used}',
+  '缓存命中率：{percent}%（缓存读取 {read} / 输入 {input}）':
+    'Попадание в кеш: {percent}% (чтение кеша {read} / вход {input})',
+  '本会话 Token：输入 {input} / 输出 {output}':
+    'Токены сессии: вход {input} / выход {output}',
 };

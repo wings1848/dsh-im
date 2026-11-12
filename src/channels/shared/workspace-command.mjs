@@ -1171,3 +1171,26 @@ export function isWorkspaceCommand(text) {
     || WORKSPACE_COMMAND.test(command)
     || THREAD_WORKSPACE_COMMAND.test(command);
 }
+
+/**
+ * Whether a workspace-family command only reads.
+ *
+ * The busy lane answers read-only forms (`/workspace`, `/wsl`, `/sessionlist`,
+ * `/conv`, …) while a turn is running. Anything that would switch the bot
+ * workspace, the conversation workspace or the bound Session changes what the
+ * in-flight turn belongs to, so the busy lane declines it and the ordinary
+ * queue keeps it until the turn releases.
+ */
+export function isReadOnlyWorkspaceCommand(text) {
+  if (typeof text !== 'string') return false;
+  const command = text.trim();
+  if (WORKSPACE_COMMAND.test(command)) {
+    return WORKSPACE_COMMAND.exec(command)?.[1] === undefined;
+  }
+  if (THREAD_WORKSPACE_COMMAND.test(command)) {
+    return THREAD_WORKSPACE_COMMAND.exec(command)?.[1] === undefined;
+  }
+  if (WORKSPACE_LIST_COMMAND.test(command) || SESSION_LIST_COMMAND.test(command)) return true;
+  if (SESSION_BIND_PREFIX.test(command)) return /^\/session$/iu.test(command);
+  return false;
+}

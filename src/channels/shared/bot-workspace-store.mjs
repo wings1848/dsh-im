@@ -2580,6 +2580,11 @@ export function createBotWorkspaceScope(
             readHistory(...args) {
               return invokeCurrentSession('readSessionHistory', args, 'history read');
             },
+            ...(typeof target.readSessionProjections === 'function' ? {
+              readProjections(...args) {
+                return invokeCurrentSession('readSessionProjections', args, 'session usage read');
+              },
+            } : {}),
             ...(typeof target.renameSession === 'function' ? {
               renameTitle(...args) {
                 return invokeStartedSessionMutation('renameSession', args, 'title rename');

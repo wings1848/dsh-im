@@ -8,6 +8,16 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ### Added / 新增
 
+- `/status` 新增会话用量三行：上下文占用（近似值 / 模型上限，带百分比）、缓存命中率（缓存读取 / 输入）与累计输入/输出 Token。数据来自 Harness 的 `tokenUsage` 与 `contextPressure` 投影；Host 未上报或读取失败时整行省略，命令不会因此失败。Telegram 状态卡与文本版共用同一格式化函数。
+  `/status` now reports Session usage: context occupancy (approximate / route limit, with percent), cache-hit rate (cached input / input), and accumulated input/output tokens. Values come from Harness's `tokenUsage` and `contextPressure` projections; a Host that does not report them omits the lines instead of failing the command. The Telegram status card and the text reply share one formatter.
+
+### Changed / 行为变更
+
+- 本地命令不再排在长回合后面：`/help`、`/status`、`/display` 以及只读的工作区/会话列表（`/workspace`、`/wsl`、`/sessionlist`、`/conv`、`/session`）在共享文字桥上立即回答；同一聊天有回合在运行时也不会先收到「已排队，等待前序消息处理」。会切换工作区或改写会话绑定的形式（`/workspace <路径或序号>`、`/conv ...`、`/session <会话 ID>`、`/new`、`/compact`）保持原有队列顺序，避免回合进行中被改绑到别的会话或工作区；`/workspace`、`/session` 选择卡在回合进行中按下时同样即时提示「当前任务仍在运行…」，不会绕过队列改绑，回合结束后再按生效。
+  Local commands no longer wait behind a long turn on the shared text bridge: `/help`, `/status`, `/display`, and the read-only workspace/Session listings (`/workspace`, `/wsl`, `/sessionlist`, `/conv`, `/session`) answer immediately while a turn is running, instead of replying “queued” first. Forms that switch the workspace or rewrite the Session binding (`/workspace <path or index>`, `/conv ...`, `/session <session ID>`, `/new`, `/compact`) keep their queue position so an in-flight turn is never rebound mid-flight; the same rule now applies to presses on the `/workspace` and `/session` pickers, which get the “task still running” notice instead of mutating behind the turn.
+
+## [5.10.1-wings.2] - 2026-11-10
+
 - 新增 `/display` 与「过程展示挡位」（极简 / 标准 / 全面）：极简只发最终答案；标准用一条可原地改写的占位消息显示「处理中 · 已用秒数 · 步数 · 最近工具」，模型开始写答案时变成「✍️ 正在整理回复」，回合结束收成一行 `✅ 完成 · 42 秒 · 5 步`（有失败步时是 `⚠️ 完成 · … · 2 步失败`）回执再发答案；全面保留逐条 💭/🔧 消息，工具结果回写到自己那一行（`· ✓ 0.8s` / `· ⚠️ 失败 0.8s`）而不是多发一条。默认挡位为「标准」，`/display` 卡片、`/display 极简|标准|全面` 与设置页下拉三处入口等价。
   Added `/display` and a three-rung display setting (minimal / standard / full): minimal sends only the final answer; standard keeps one editable placeholder with a compact "processing · elapsed · steps · latest tool" line that becomes “✍️ Writing the reply” once the model starts answering, and collapses into a one-line `✅ Done · 42s · 5 steps` receipt (or `⚠️ Done · … · 2 failed` when steps failed) before the answer; full keeps the per-line 💭/🔧 trace and writes each tool outcome back onto its own line (`· ✓ 0.8s` / `· ⚠️ failed 0.8s`) instead of adding a message. The default is standard, and the `/display` card, `/display minimal|standard|full`, and the settings select are equivalent entry points.
 - 新增 `/menu` 控制台卡片：会话 / 工作区 / 模型 / 预设 / 状态一张摘要卡加行内按钮，排在原生菜单与 `/help` 首位，省掉「先打字去问状态」这一跳；`/start` 改为三入口欢迎卡（菜单 / 显示挡位 / 帮助），不再把字面 `/start` 交给模型。
