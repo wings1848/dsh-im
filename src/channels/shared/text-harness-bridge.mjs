@@ -1417,7 +1417,9 @@ export class TextHarnessBridge {
         t('{label}机器人已连接 DeepSeek Harness。', { label: this.#descriptor.label }),
         '',
         t('直接发送文字、图片或文件即可继续当前会话。'),
-        ...commandHelpLines(this.#descriptor.key),
+        ...commandHelpLines(this.#descriptor.key, availableCommandCatalog(SHARED_COMMAND_CATALOG, {
+          supportsFork: this.#harness.supportsSessionFork?.() ?? true,
+        })),
       ].join('\n'));
       return true;
     }
