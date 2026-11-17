@@ -1,9 +1,9 @@
+import { qrToBuffer } from '../shared/qr-code.mjs';
 import { captureGroupHistory } from '../shared/group-history.mjs';
 import { BusyMessageDispatcher, canAutomaticallySteer } from '../shared/busy-message-dispatcher.mjs';
 import { isPermissionCommand, runPermissionCommand } from '../shared/permission-command.mjs';
 import { randomUUID } from 'node:crypto';
 import { chunkMarkdownText } from '../shared/markdown-chunks.mjs';
-import QRCode from 'qrcode';
 import { waitForFeishuOperation } from './feishu-channel.mjs';
 import { startNewConversation } from '../shared/new-command.mjs';
 import {
@@ -2364,7 +2364,7 @@ export class FeishuHarnessBridge {
 
   async #sendRepairQr(chatId, url, snapshot) {
     try {
-      const image = await QRCode.toBuffer(url, {
+      const image = await qrToBuffer(url, {
         errorCorrectionLevel: 'M', margin: 1, width: 480, type: 'png',
       });
       const uploaded = await this.#client.im.v1.image.create({

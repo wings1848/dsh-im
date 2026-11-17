@@ -1,8 +1,8 @@
+import { qrToDataUrl } from '../../../../src/channels/shared/qr-code.mjs';
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import {
   connectionTestTargetUnavailable,
@@ -123,7 +123,7 @@ function sanitizePublic(value) {
 }
 
 async function qrDataUrl(value) {
-  return QRCode.toDataURL(value, {
+  return qrToDataUrl(value, {
     type: 'image/png', errorCorrectionLevel: 'M', margin: 2, width: 320,
   });
 }

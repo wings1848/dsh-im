@@ -1,9 +1,9 @@
+import { qrToDataUrl } from '../../../../src/channels/shared/qr-code.mjs';
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload } from '../../../../src/channels/shared/message-mode.mjs';
 import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import { SET_CONTEXT_ENHANCEMENT_ENDPOINT, validContextEnhancementPayload } from '../shared/context-enhancement-rpc.mjs';
 import { SET_ACCESS_POLICY_ENDPOINT, validAccessPolicyPayload } from '../shared/access-policy-rpc.mjs';
@@ -193,7 +193,7 @@ function sanitizePublic(value) {
 }
 
 async function qrDataUrl(value) {
-  return QRCode.toDataURL(value, {
+  return qrToDataUrl(value, {
     type: 'image/png',
     errorCorrectionLevel: 'M',
     margin: 2,

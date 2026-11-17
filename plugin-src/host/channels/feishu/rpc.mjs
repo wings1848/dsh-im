@@ -1,10 +1,10 @@
+import { qrToDataUrl } from '../../../../src/channels/shared/qr-code.mjs';
 import { SET_MESSAGE_MODE_ENDPOINT, validMessageModePayload, normalizeBusyMessageMode } from '../../../../src/channels/shared/message-mode.mjs';
 import { diagnosticFields } from '../../../../src/channels/shared/diagnostic-details.mjs';
 import { createConnectionDiagnostics, diagnosticRpcResult } from '../../../../src/channels/shared/connection-error.mjs';
 import { normalizeBotAlias } from '../../../../src/channels/shared/bot-alias.mjs';
 import { SET_ALIAS_ENDPOINT, validAliasPayload } from '../shared/bot-alias-rpc.mjs';
 import { registerManagementRpc } from '../../../management-rpc.mjs';
-import QRCode from 'qrcode';
 import { qrEncodingError } from '../../../../src/channels/shared/qr-encoding-error.mjs';
 import {
   normalizeAgentPresetCatalog,
@@ -266,7 +266,7 @@ function connectionState(status, registration, connected) {
 }
 
 async function qrCodeDataUrl(verificationUrl) {
-  return QRCode.toDataURL(verificationUrl, {
+  return qrToDataUrl(verificationUrl, {
     errorCorrectionLevel: 'M', margin: 1, width: 320, type: 'image/png',
   });
 }

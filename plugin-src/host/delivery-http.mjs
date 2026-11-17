@@ -1,8 +1,42 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 import { createDeliveryRpcHandler, DELIVERY_ENDPOINTS } from './delivery-rpc.mjs';
 
 export const DELIVERY_HTTP_PATH = '/api/dsh-im/delivery/messages';
 
 const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * The endpoint is loopback-only until the profile configures
+ * `deliveryHttpToken`; that token is the only way to accept a caller from
+ * another host. A forwarded header is deliberately ignored: only the socket
+ * peer decides, so a reverse proxy cannot widen reachability by accident.
+ */
+export function isLoopbackAddress(address) {
+  if (typeof address !== 'string') return false;
+  const value = address.trim().toLowerCase();
+  if (value === '::1') return true;
+  if (value.startsWith('::ffff:')) return isLoopbackAddress(value.slice('::ffff:'.length));
+  return /^127(?:\.\d{1,3}){3}$/u.test(value);
+}
+
+function digest(value) {
+  return createHash('sha256').update(value, 'utf8').digest();
+}
+
+function bearerToken(request) {
+  const header = request.headers?.authorization;
+  if (typeof header !== 'string') return null;
+  const [scheme, ...rest] = header.trim().split(/\s+/u);
+  if (scheme?.toLowerCase() !== 'bearer' || rest.length !== 1 || !rest[0]) return null;
+  return rest[0];
+}
+
+function refused(response, status, code, headers = {}) {
+  json(response, status, {
+    error: { code, message: code, details: {} },
+  }, headers);
+}
 
 const DELIVERY_ERROR_STATUS = Object.freeze({
   'bad-request': 400,
@@ -65,9 +99,22 @@ async function readJsonBody(request) {
   }
 }
 
-export function createDeliveryHttpHandler(service) {
+export function createDeliveryHttpHandler(service, { token } = {}) {
   const dispatch = createDeliveryRpcHandler(service);
+  const expectedToken = typeof token === 'string' && token.trim() ? digest(token.trim()) : null;
   return async (request, response) => {
+    if (expectedToken === null) {
+      if (!isLoopbackAddress(request.socket?.remoteAddress)) {
+        refused(response, 403, 'loopback-only');
+        return;
+      }
+    } else {
+      const provided = bearerToken(request);
+      if (provided === null || !timingSafeEqual(expectedToken, digest(provided))) {
+        refused(response, 401, 'unauthorized', { 'www-authenticate': 'Bearer' });
+        return;
+      }
+    }
     if (request.method !== 'POST') {
       json(response, 405, {
         error: { code: 'method-not-allowed', message: 'method-not-allowed', details: {} },
@@ -115,7 +162,7 @@ export function createDeliveryHttpHandler(service) {
   };
 }
 
-export function installDeliveryHttp(ctx, service) {
+export function installDeliveryHttp(ctx, service, { token } = {}) {
   if (!ctx?.webServer || typeof ctx.webServer.register !== 'function'
     || typeof ctx.effect !== 'function') {
     throw new TypeError('DSH Host WebServer is required');
@@ -123,7 +170,7 @@ export function installDeliveryHttp(ctx, service) {
   const route = {
     kind: 'exact',
     path: DELIVERY_HTTP_PATH,
-    handler: createDeliveryHttpHandler(service),
+    handler: createDeliveryHttpHandler(service, { token }),
   };
   return ctx.effect(
     () => ctx.webServer.register(route),

@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="assets/logo-dsh-im-connecting-readme-3x2.png" alt="DSH-IM — Connecting DeepSeek Harness" width="420" height="280" align="middle">&nbsp;&nbsp;
-  <img src="assets/logo-plugin-phone.png" alt="DSH-IM phone logo" width="280" height="280" align="middle">
+  <img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/assets/logo-dsh-im-connecting-readme-3x2.png" alt="DSH-IM — Connecting DeepSeek Harness" width="420" height="280" align="middle">&nbsp;&nbsp;
+  <img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/assets/logo-plugin-phone.png" alt="DSH-IM phone logo" width="280" height="280" align="middle">
 </p>
 
 ---
@@ -50,7 +50,7 @@
 <table width="100%">
   <tr>
     <td width="180" align="center" valign="middle">
-      <a href="https://88api.ai/sign-up?aff=lJoL"><img src="assets/sponsors/88api.jpg" alt="88API Token聚合平台" width="150"></a>
+      <a href="https://88api.ai/sign-up?aff=lJoL"><img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/assets/sponsors/88api.jpg" alt="88API Token聚合平台" width="150"></a>
     </td>
     <td valign="middle">
       <a href="https://88api.ai/sign-up?aff=lJoL"><strong>88API Token聚合平台</strong></a>赞助了本项目！88API 是一家由香港企业运营并且主要面向开发者、创作者与 AI 应用用户的一站式多模型 API 平台，通过统一接口接入文本、图片、语音和视频模型，覆盖 AI 编程、智能翻译、内容创作、配音、图像生成、视频生成等常见工作流。可提供高质量的折扣Deepseek官转算力和自有B300集群自部署Deepseek算力；支持国际主流付款方式，可提供发票，提供企业级稳定服务。<a href="https://88api.ai/sign-up?aff=lJoL"><strong>通过此链接注册可以获取专属赠送额度！</strong></a>
@@ -93,15 +93,15 @@
 
 ## 简介
 
-通过扫码、App Manifest 或已有机器人凭据把 IM 机器人接入 DeepSeek Harness，并让本机 Harness 主动连接公网 AI Office。一个插件、一个设置入口，统一管理内置 IM 渠道和 AI Office Connector。**每个 IM 渠道都支持接入多个机器人**，各机器人的连接状态、工作区、模型和会话绑定彼此独立；iMessage 是本机 Messages.app 身份接入的例外，详见[iMessage 渠道说明](docs/imessage.md)。
+通过扫码、App Manifest 或已有机器人凭据把 IM 机器人接入 DeepSeek Harness，并让本机 Harness 主动连接公网 AI Office。一个插件、一个设置入口，统一管理内置 IM 渠道和 AI Office Connector。**每个 IM 渠道都支持接入多个机器人**，各机器人的连接状态、工作区、模型和会话绑定彼此独立；iMessage 是本机 Messages.app 身份接入的例外，详见[iMessage 渠道说明](https://github.com/xmanrui/dsh-im/blob/main/docs/imessage.md)。
 
 Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest, or entering existing bot credentials, and let the local Harness connect outward to a public AI Office. One plugin and one settings entry manage the built-in IM channels and the AI Office Connector.
 
 ## 界面
 
-![IM 机器人页面](docs/images/imbot.png)
+![IM 机器人页面](https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/imbot.png)
 
-<img src="docs/images/Context_enhancement.png" alt="上下文增强页面" width="49%"> <img src="docs/images/access_mode.png" alt="访问模式页面" width="49%">
+<img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/Context_enhancement.png" alt="上下文增强页面" width="49%"> <img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/access_mode.png" alt="访问模式页面" width="49%">
 
 ## 当前内置渠道
 
@@ -117,14 +117,14 @@ Connect IM bots to DeepSeek Harness by scanning a QR code, using an App Manifest
 | Telegram | 使用 @BotFather 生成的 Bot Token | Bot API 长轮询；默认私聊直接响应、群聊被提及或回复时响应，也可为每个机器人独立启用私聊白名单安全模式；关闭思考过程留痕时，私聊、群聊和 Topic 均通过占位消息编辑展示进度并原位完成富文本回复，避免 Android 私聊 Draft 占用发送入口，平台不支持富文本时回退为普通文字 |
 | Discord | 使用 Developer Portal 生成的 Bot Token | Gateway v10 长连接；私信直接回复；服务器文字/公告频道首次 @ 后创建原生 Thread，后续在线程中无需重复 @，并通过编辑消息流式显示回答 |
 | WhatsApp | 使用手机 WhatsApp 扫码关联设备 | WhatsApp Web 长连接；默认仅响应账号自聊，也可切换到指定联系人或开放响应模式；群聊仅在被 @ 或回复机器人消息时触发，主人普通发言不触发；显示已读和“正在输入”，通过每秒编辑同一条消息显示工具进度和逐步生成的回答，长回复自动分段，编辑失败时回退为完整文字回复 |
-| iMessage | 在 macOS Messages.app 中登录 iMessage，并按[渠道说明](docs/imessage.md)授予本机权限 | 使用 macOS 原生 Messages.app 收发文本私聊；不依赖 BlueBubbles；每个 macOS 用户账户使用一个本机 iMessage 身份 |
+| iMessage | 在 macOS Messages.app 中登录 iMessage，并按[渠道说明](https://github.com/xmanrui/dsh-im/blob/main/docs/imessage.md)授予本机权限 | 使用 macOS 原生 Messages.app 收发文本私聊；不依赖 BlueBubbles；每个 macOS 用户账户使用一个本机 iMessage 身份 |
 | Matrix（实验功能） | 填写 homeserver 地址，并提供访问令牌，或用户 ID 与密码 | CS API 长轮询接收；私聊直接回复，房间被 @ 后响应，支持线程回复、HTML 白名单富文本与编辑式流式输出，可回传图片和结果文件；包含实验性房间消息加解密，限制见下文 |
 
 WhatsApp 会保存最近 2,000 条机器人群消息的标识，重启后仍可通过引用这些消息唤醒机器人。升级前未记录或已超出保留范围的历史消息不会作为唤醒依据；请 @ 机器人或回复其新消息。
 
 Matrix 加密目前仅供非敏感测试：默认 optional 模式尝试启动加密引擎，失败时跳过收到的加密消息；required 模式在引擎启动失败时拒绝连接。尚未实现交互式设备验证、密钥备份、SSSS 或媒体附件内容加密，本次发布未验证真实 homeserver／Element 互通，请勿将其视为完整的端到端保密保障。
 
-企业微信自建应用的回调基址、代理地址和企业可信 IP 配置，见[企业微信自建应用接入说明](docs/企业微信自建应用接入.md)。
+企业微信自建应用的回调基址、代理地址和企业可信 IP 配置，见[企业微信自建应用接入说明](https://github.com/xmanrui/dsh-im/blob/main/docs/企业微信自建应用接入.md)。
 
 其他 IM 平台可继续按同一渠道适配器结构接入。
 
@@ -140,13 +140,13 @@ WhatsApp、飞书、Telegram、Discord、Slack、QQ 支持自动保存实际收�
 
 记录按群共享，独立于机器人、AI 会话和工作区，默认滚动保留 **14 天**。可在 **DSH 设置 → IM机器人 → 齿轮「通用设置」→ 通用** 修改保留天数。只保存实际接收的内容，不回填完整历史；QQ 当前按应用来源隔离，Discord 线程独立保存。
 
-详见[群消息记录与群文件使用指南](docs/group-history.md)：包含六渠道权限与设置步骤、查询示例、存储位置、文件限制和排查方法。WhatsApp、飞书、QQ 已完成文字及文本附件实测；Telegram 已完成文字实测，文件暂未验证；Discord、Slack 待真实群验收。
+详见[群消息记录与群文件使用指南](https://github.com/xmanrui/dsh-im/blob/main/docs/group-history.md)：包含六渠道权限与设置步骤、查询示例、存储位置、文件限制和排查方法。WhatsApp、飞书、QQ 已完成文字及文本附件实测；Telegram 已完成文字实测，文件暂未验证；Discord、Slack 待真实群验收。
 
 ### 超时后的结果补发
 
 已接入的 IM 渠道共用超时任务跟踪：收到“等待模型回复超时”后，插件会继续检查原任务，完成后向原聊天或线程补发最终文字；插件重启或连接恢复后也会继续检查。`/stop` 只停止当前聊天提交的对应回合，切换会话后不再向该聊天补发旧会话的结果。无需新增设置，正常回复流程保持原样。
 
-补发仍受渠道发送权限和配额限制。明确发送失败最多尝试三次；发送结果不确定时保留记录并停止自动重试，避免重复消息。此机制恢复文字结果和终态通知，不重放问题、审批或文件工具调用。详见[延迟交付说明](docs/deferred-delivery.md)。
+补发仍受渠道发送权限和配额限制。明确发送失败最多尝试三次；发送结果不确定时保留记录并停止自动重试，避免重复消息。此机制恢复文字结果和终态通知，不重放问题、审批或文件工具调用。详见[延迟交付说明](https://github.com/xmanrui/dsh-im/blob/main/docs/deferred-delivery.md)。
 
 ### 结果文件与图片回传
 
@@ -169,7 +169,7 @@ WhatsApp、飞书、Telegram、Discord、Slack、QQ 支持自动保存实际收�
 
 ## AI Office Connector
 
-[查看 AI Office Connector 说明](docs/AI-Office-Connector.md)
+[查看 AI Office Connector 说明](https://github.com/xmanrui/dsh-im/blob/main/docs/AI-Office-Connector.md)
 
 ## 安装
 
@@ -261,7 +261,7 @@ Logo 由 dsh-im 的浏览器适配显示，无需修改 DSH。适配保留原始
 
 ### 客户端面板接入
 
-支持全局面板的 DSH 在左侧边栏提供「IM机器人」，沿用插件页的双对话框造型，以单色细线图标显示，点击打开完整 IM 管理面板。原「设置 → IM机器人」和插件详情页的「打开 IM机器人」入口保留。宿主也可通过可选客户端服务 `dshImClient` 嵌入面板；接口、兼容要求与接入示例见[客户端接入文档](docs/client-integration.md)。
+支持全局面板的 DSH 在左侧边栏提供「IM机器人」，沿用插件页的双对话框造型，以单色细线图标显示，点击打开完整 IM 管理面板。原「设置 → IM机器人」和插件详情页的「打开 IM机器人」入口保留。宿主也可通过可选客户端服务 `dshImClient` 嵌入面板；接口、兼容要求与接入示例见[客户端接入文档](https://github.com/xmanrui/dsh-im/blob/main/docs/client-integration.md)。
 
 ### 会话 → 对话反查（宿主服务）
 
@@ -311,15 +311,15 @@ const info = dshIm.describeConversationSync(sessionId);
 
 ### 上下文增强
 
-[查看上下文增强说明](docs/上下文增强.md)
+[查看上下文增强说明](https://github.com/xmanrui/dsh-im/blob/main/docs/上下文增强.md)
 
 ### 访问模式
 
-[查看访问模式说明](docs/访问模式.md)
+[查看访问模式说明](https://github.com/xmanrui/dsh-im/blob/main/docs/访问模式.md)
 
 ## 检查与安装更新
 
-[查看检查与安装更新说明](docs/检查与安装更新.md)
+[查看检查与安装更新说明](https://github.com/xmanrui/dsh-im/blob/main/docs/检查与安装更新.md)
 
 ## 机器人命令
 
@@ -367,13 +367,13 @@ Web 与机器人可同时处理同一审批，先提交的「批准一次」或�
 
 钉钉菜单使用插件内置的共享卡片模板，无需逐个机器人创建或配置模板。卡片打开后可操作 30 分钟；超时或 Host 重启后重新发送 `/m`。模板源文件保存在 `assets/dingtalk-menu-template.json`，供维护者导入卡片平台更新。
 
-[查看命令说明](docs/机器人命令.md)
+[查看命令说明](https://github.com/xmanrui/dsh-im/blob/main/docs/机器人命令.md)
 
 ## 其它功能
 
 ### 按 Agent Preset 自动分组
 
-在插件 Host 配置中设置 `groupByAgentPreset: true`（默认关闭），也可在某个渠道配置中单独启用或关闭。选择明确的 Agent Preset 后，在默认 IM 目录下创建或复用 `presets/<preset-id>` 工作区，标题使用 Preset 名称；后续新会话进入该分组。已有聊天保留原历史和位置，手动目录、会话级目录和飞书目录隔离优先。详见 [配置和行为](docs/preset-workspaces.md)。
+在插件 Host 配置中设置 `groupByAgentPreset: true`（默认关闭），也可在某个渠道配置中单独启用或关闭。选择明确的 Agent Preset 后，在默认 IM 目录下创建或复用 `presets/<preset-id>` 工作区，标题使用 Preset 名称；后续新会话进入该分组。已有聊天保留原历史和位置，手动目录、会话级目录和飞书目录隔离优先。详见 [配置和行为](https://github.com/xmanrui/dsh-im/blob/main/docs/preset-workspaces.md)。
 
 
 - **图片识别**：支持图片输入的内置渠道都可以把 JPEG、PNG、WebP，以及以图片文件方式发送的 GIF 交给 Harness；图片可以附带文字说明。默认每张原图最多接收 30 MB、每条消息最多 20 张；原图保存到会话工作区，模型副本自动缩放或压缩到单张 5 MB、总计 20 MB 以内，仍超限或模型不支持图片时按文件交给模型处理。这四项限制可在「通用设置 → 附件 → 图片输入」调整，对后续消息生效；原图沿用附件保留时长。调高模型输入上限会增加请求体积、处理耗时和模型成本，也仍受平台及宿主限制。iMessage 首版仅支持文本私聊。
@@ -442,7 +442,7 @@ dsh web --trusted-host dsh.example.com
 
 管理请求返回 401 时，请通过有效启动链接重新登录；403 表示访问被拒，应检查 DSH 可信地址、代理的 Host／Origin 和插件的 `rpcAuthority` 配置。远程访问 NAS 时，不要将浏览器地址改为自己电脑的 localhost。接口可访问不代表当前安装方式允许按钮更新：源码／链接安装、不支持的执行环境等仍沿用现有限制；确认安装、版本校验、并发锁和手动重启流程不变。
 
-局域网管理的 HTTP 集成测试可在构建插件后运行 `node scripts/verify-lan-management.mjs /path/to/built/deepseek-harness`。脚本启动原版 DSH CLI，使用独立临时 profile 和空机器人配置，检查默认访问、登录认证、Host／Origin 检查以及显式 `loopback` 策略，结束后停止服务并清理临时目录。测试通过回环 TCP 发送局域网 Host／Origin，不替代跨设备浏览器验收；原版 `0.1.5-alpha.1` CLI 本身拒绝 `--host 0.0.0.0`，跨设备测试需使用支持局域网访问的 Harness 环境。
+局域网管理的 HTTP 集成测试可在构建插件后运行 `node scripts/verify-lan-management.mjs /path/to/built/deepseek-harness`。脚本启动原版 DSH CLI，使用独立临时 profile 和空机器人配置，检查默认访问、登录认证、Host／Origin 检查以及显式 `loopback` 策略，结束后停止服务并清理临时目录。测试通过回环 TCP 发送局域网 Host／Origin，不替代跨设备浏览器验收；早于 0.2.0 的原版 CLI 本身拒绝 `--host 0.0.0.0`，跨设备测试需使用支持局域网访问的 Harness 环境。
 
 ### 聊天消息语言
 
@@ -488,13 +488,13 @@ dsh web --trusted-host dsh.example.com
       <a href="mailto:longmanr307@gmail.com">longmanr307@gmail.com</a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/QQ.png"><img src="docs/images/QQ.png" alt="dsh-im QQ群二维码" width="240"></a>
+      <a href="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/QQ.png"><img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/QQ.png" alt="dsh-im QQ群二维码" width="240"></a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/xhs.jpg"><img src="docs/images/xhs.jpg" alt="小红书二维码" width="240"></a>
+      <a href="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/xhs.jpg"><img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/xhs.jpg" alt="小红书二维码" width="240"></a>
     </td>
     <td align="center" valign="top">
-      <a href="docs/images/WhatsApp.jpg"><img src="docs/images/WhatsApp.jpg" alt="WhatsApp 二维码" width="240"></a>
+      <a href="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/WhatsApp.jpg"><img src="https://raw.githubusercontent.com/xmanrui/dsh-im/main/docs/images/WhatsApp.jpg" alt="WhatsApp 二维码" width="240"></a>
     </td>
   </tr>
 </table>

@@ -6,6 +6,23 @@ This file records the notable changes in each dsh-im release. Its format follows
 
 ## [Unreleased]
 
+## [5.10.1-wings.3] - 2026-11-11
+
+### Added / 新增
+
+- 新增会话级通知工具 `dsh_im_notify`：任意 DSH 会话（Web、CLI、后台、subagent）都可以通过已接入的 IM 渠道主动发送文字、标题和 1–8 个选项；每条消息自动带「会话短 id · 会话名」标签，Telegram 私聊渲染原生按钮，其他渠道降级为编号文字。
+  Added the session-scoped `dsh_im_notify` tool: any DSH session (Web, CLI, background, subagent) can send text, a title and 1–8 options through a connected IM channel. Every message carries a short session id and name; Telegram private chats render native buttons while other channels fall back to numbered text.
+- 新增默认通知目标：设置页「设为默认通知」保存 `botId + targetId`；工具按「显式 targetId → 默认目标 → 全 Host 唯一目标」解析，歧义、失效和跨 bot 同名都返回可操作错误，不猜测收件人。
+  Added a saved default notification target (`botId + targetId`) with explicit-target → saved-default → single-target resolution; ambiguity, stale targets and cross-bot duplicates return actionable errors instead of guessing a recipient.
+- 卡片按钮点击后经 `session.prompt`（queue）把选择注入发起会话，并校验 Host 结果；失败回执「未转交」而不是假成功；nonce 使用随机字节、TTL 1 小时、最多 50 条，且只向 Telegram 私聊发按钮。
+  A card press injects the choice back into the originating Session through `session.prompt` (queue) and verifies the Host result; failures are reported as “not handed off” instead of a false success. Nonces use random bytes, expire after one hour, cap at 50 entries, and buttons are only sent to Telegram private chats.
+
+### Tests / 测试
+
+- 全量 5158 例：5157 通过、1 跳过、0 失败（2026-11-11 隔离容器复跑，Node 26.13.0，`npm test -- --test-concurrency=2`）。
+  - 评审优化后复跑 5162 例：5161 通过、1 跳过、0 失败（2026-11-12，Node 26.12.0，`node --test --test-concurrency=1`；新增 4 条 HTTP 投递鉴权回归）。
+  Full suite: 5158 tests, 5157 passing, 1 skipped, 0 failing (isolated container run on 2026-11-11, Node 26.13.0).
+
 ## [5.10.1-wings.2] - 2026-11-10
 
 > 本仓是个人 fork（基线 v5.10.0 + Telegram 卡片相关分支），版本号用 `-wings.N` 后缀，避免被上游正式版覆盖。

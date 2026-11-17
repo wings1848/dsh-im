@@ -7,6 +7,7 @@ import {
   DELIVERY_HTTP_PATH,
   createDeliveryHttpHandler,
   installDeliveryHttp,
+  isLoopbackAddress,
 } from '../plugin-src/host/delivery-http.mjs';
 
 function serviceFixture() {
@@ -41,10 +42,10 @@ async function withServer(handler, callback) {
   }
 }
 
-async function request(url, { method = 'POST', body, contentType = 'application/json' } = {}) {
+async function request(url, { method = 'POST', body, contentType = 'application/json', headers = {} } = {}) {
   const response = await fetch(url, {
     method,
-    headers: contentType === undefined ? {} : { 'content-type': contentType },
+    headers: { ...(contentType === undefined ? {} : { 'content-type': contentType }), ...headers },
     body,
   });
   return {
@@ -196,4 +197,104 @@ test('delivery HTTP installs one exact WebServer route with Cordis lifecycle own
   assert.equal(registrations[0].kind, 'exact');
   assert.equal(registrations[0].path, DELIVERY_HTTP_PATH);
   assert.equal(typeof registrations[0].handler, 'function');
+});
+
+
+function fakeRequest(remoteAddress, { method = 'POST', headers = { 'content-type': 'application/json' }, body = '' } = {}) {
+  const chunks = body ? [Buffer.from(body)] : [];
+  return {
+    method,
+    headers,
+    socket: { remoteAddress },
+    once() {},
+    off() {},
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) yield chunk;
+    },
+  };
+}
+
+function fakeResponse() {
+  const result = { status: 0, headers: {}, body: null };
+  return {
+    result,
+    destroyed: false,
+    writableEnded: false,
+    writeHead(status, headers) {
+      result.status = status;
+      result.headers = headers;
+    },
+    end(body) {
+      result.body = JSON.parse(body);
+      this.writableEnded = true;
+    },
+    once() {},
+    off() {},
+  };
+}
+
+test('delivery HTTP only recognizes real loopback peers', () => {
+  for (const address of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1']) {
+    assert.equal(isLoopbackAddress(address), true, address);
+  }
+  for (const address of ['10.0.0.5', '192.168.1.2', '::ffff:10.0.0.5', '203.0.113.9', undefined, '']) {
+    assert.equal(isLoopbackAddress(address), false, String(address));
+  }
+});
+
+test('delivery HTTP without a token refuses non-loopback peers before reading the body', async () => {
+  const { service, calls } = serviceFixture();
+  const response = fakeResponse();
+  await createDeliveryHttpHandler(service)(
+    fakeRequest('10.0.0.5', { body: JSON.stringify({ botId: 'bot_one', targetId: 't', text: 'hi' }) }),
+    response,
+  );
+  assert.equal(response.result.status, 403);
+  assert.equal(response.result.body.error.code, 'loopback-only');
+  assert.deepEqual(calls, []);
+});
+
+test('delivery HTTP accepts a non-loopback peer only with the configured bearer token', async () => {
+  const { service, calls } = serviceFixture();
+  const handler = createDeliveryHttpHandler(service, { token: 'delivery-secret' });
+  const payload = JSON.stringify({ botId: 'bot_one', targetId: 't', text: 'hi' });
+
+  const anonymous = fakeResponse();
+  await handler(fakeRequest('10.0.0.5', { body: payload }), anonymous);
+  assert.equal(anonymous.result.status, 401);
+  assert.equal(anonymous.result.body.error.code, 'unauthorized');
+
+  const wrong = fakeResponse();
+  await handler(fakeRequest('10.0.0.5', {
+    body: payload,
+    headers: { 'content-type': 'application/json', authorization: 'Bearer nope' },
+  }), wrong);
+  assert.equal(wrong.result.status, 401);
+  assert.deepEqual(calls, []);
+
+  const allowed = fakeResponse();
+  await handler(fakeRequest('10.0.0.5', {
+    body: payload,
+    headers: { 'content-type': 'application/json', authorization: 'Bearer delivery-secret' },
+  }), allowed);
+  assert.equal(allowed.result.status, 200);
+  assert.deepEqual(allowed.result.body, { sent: true });
+  assert.equal(calls.length, 1);
+});
+
+test('delivery HTTP requires the bearer token even on loopback once it is configured', async () => {
+  const { service, calls } = serviceFixture();
+  await withServer(createDeliveryHttpHandler(service, { token: 'delivery-secret' }), async (url) => {
+    const missing = await request(url, { body: JSON.stringify({ botId: 'bot_one', targetId: 't', text: 'hi' }) });
+    assert.equal(missing.status, 401);
+    assert.equal(missing.body.error.code, 'unauthorized');
+
+    const allowed = await request(url, {
+      body: JSON.stringify({ botId: 'bot_one', targetId: 't', text: 'hi' }),
+      headers: { authorization: 'Bearer delivery-secret' },
+    });
+    assert.equal(allowed.status, 200);
+    assert.deepEqual(allowed.body, { sent: true });
+  });
+  assert.equal(calls.length, 1);
 });

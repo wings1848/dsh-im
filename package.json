@@ -50,13 +50,14 @@
     "./locale/*.json": "./locale/*.json"
   },
   "files": [
-    "assets",
+    "assets/logo-plugin-message-link-gradient.webp",
     "bin",
     "cordis.patch.yml",
     "lib",
     "locale/*.json",
     "plugin-src",
     "scripts/telegram-menu-scopes.mjs",
+    "scripts/verify-docs.mjs",
     "scripts/verify-interface-language.mjs",
     "scripts/verify-injected-context.mjs",
     "scripts/verify-lan-management.mjs",
@@ -81,7 +82,6 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-connection",
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-locale"
@@ -102,10 +102,11 @@
   "scripts": {
     "build": "node plugin-src/client/build.mjs && node plugin-src/host/build.mjs",
     "test": "node --test test/*.test.mjs test/channels/*/*.test.mjs",
-    "check": "npm run build && npm test && node scripts/verify-package.mjs"
+    "check": "npm run build && npm test && node scripts/verify-package.mjs && node scripts/verify-docs.mjs"
   },
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
   },
   "dependencies": {
     "@matrix-org/olm": "3.2.15",
