@@ -33,8 +33,6 @@ import {
   sessionIdTail,
   workspaceTail,
 } from './status-command.mjs';
-import { runCompactCommand } from './compact-command.mjs';
-import { runStatusCommand } from './status-command.mjs';
 import { isCompactCommand, runCompactCommand } from './compact-command.mjs';
 import { isClearCommand, runClearCommand } from './clear-command.mjs';
 import { isResetCommand, runResetCommand } from './reset-command.mjs';
@@ -1580,6 +1578,46 @@ export class TextHarnessBridge {
       const hasReply = hasReplyReference(message);
       if (!text && !hasImages && !hasFiles && !hasReply) {
         await this.#bot.sendText(target, t('目前支持文字、图片和文件消息。'));
+        return;
+      }
+      // `/go N <text>`, `/prev <text>` and `/next <text>` switch the Session and
+      // then submit the remainder through the ordinary prompt path. The follow-up
+      // is queued, never awaited here: this job is already inside the
+      // per-conversation queue, so awaiting the next job would deadlock it.
+      if (!hasImages && !hasFiles && isSessionNavCommand(text)) {
+        const result = await runSessionNavCommand(
+          text,
+          this.#harness,
+          this.#state,
+          conversationKey,
+          { signal: this.#signal, isDirect: message.kind === 'direct' },
+        );
+        if (result) {
+          await this.#presentSessionNavResult(target, result);
+          if (result.askText) {
+            const followUp = this.#enqueueMessage(
+              {
+                ...message,
+                controlText: result.askText,
+                content: result.askText,
+                images: undefined,
+                files: undefined,
+                replyTo: undefined,
+                batchSubmission: undefined,
+              },
+              `${messageId}-ask`,
+              senderId,
+              conversationKey,
+            );
+            followUp.catch((error) => {
+              this.#logger.warn?.(
+                `[dsh-im:${this.#descriptor.key}] follow-up ask after a nav command failed:`,
+                error?.message ?? error,
+              );
+              this.#bot.sendText(target, t('切换后的提问发送失败，请重试。')).catch(() => undefined);
+            });
+          }
+        }
         return;
       }
       if (await this.#handleLocalCommand(message, messageId, conversationKey, {
