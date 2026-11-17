@@ -217,13 +217,13 @@ export function createImHostPlugin(internals = {}) {
           activate,
         );
         ctx.inject(['webServer'], (httpCtx) => {
-          startDeliveryHttp(httpCtx, deliveryService);
+          startDeliveryHttp(httpCtx, deliveryService, { token: config.deliveryHttpToken });
         });
         return;
       }
       await activate(ctx);
       if (ctx?.webServer?.register && typeof ctx?.effect === 'function') {
-        startDeliveryHttp(ctx, deliveryService);
+        startDeliveryHttp(ctx, deliveryService, { token: config.deliveryHttpToken });
       }
     },
   });

@@ -185,7 +185,7 @@ curl --request POST \
 
 接口路径固定为 `POST /api/dsh-im/delivery/messages`，复用当前 DSH Host 的 WebServer，不会另开端口。示例中的 `3080` 是 Web profile 的默认端口；实际地址以 Host 启动时显示的地址为准。
 
-当前 HTTP 接口不包含鉴权，也不提供 CORS。只应在本机或可信网络中使用，不要直接暴露到公网。
+当前 HTTP 接口不提供 CORS。未配置 `deliveryHttpToken` 时只接受回环调用；要从其他机器调用，需同时配置 `deliveryHttpToken` 并在请求中携带 `Authorization: Bearer <token>`。不要直接暴露到公网。
 
 ## 在同一 Host 的插件中发送
 
@@ -396,7 +396,15 @@ HTTP 接口只在当前 Host 提供 WebServer 时注册，并使用同一个监�
     host: '0.0.0.0'
 ```
 
-这会同时扩大该 WebServer 上其他页面和路由的网络可达范围。当前主动投递 HTTP 接口没有鉴权，因此只能配合可信局域网、防火墙或反向代理使用，不能直接暴露到公网。
+这会同时扩大该 WebServer 上其他页面和路由的网络可达范围。主动投递 HTTP 接口默认只接受回环调用；要从其他机器调用，须在该 profile 的 `cordis.patch.yml` 中配置 token：
+
+```yaml
+- id: xmanrui-dsh-im
+  config:
+    deliveryHttpToken: '请替换为随机长字符串'
+```
+
+配置后所有调用（包括本机）都必须携带 `Authorization: Bearer <token>`。token 只应配合可信局域网、防火墙或反向代理使用，不能直接暴露到公网。
 
 Connection RPC 默认只允许当前 Host 的回环调用。若 Web profile 明确运行在受信任局域网，可在该 profile 的 `cordis.patch.yml` 中复用现有 Host authority：
 

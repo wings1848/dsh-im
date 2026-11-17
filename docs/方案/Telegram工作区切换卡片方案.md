@@ -144,7 +144,7 @@
 
 ### 闸门 3 补充：上游调研与采纳
 
-上游调研见 [docs/research/tg-ux-upstream-brief.md](../research/tg-ux-upstream-brief.md)（openclaw / hermes-agent / Memoh 三仓，144 条 file:line 引用）。
+上游调研见 `docs/research/tg-ux-upstream-brief.md`（openclaw / hermes-agent / Memoh 三仓，144 条 file:line 引用；该调研文件未随仓库发布）。
 本轮采纳：
 
 | 建议 | 本方案落点 |

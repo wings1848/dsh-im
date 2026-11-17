@@ -6,9 +6,29 @@
  * transport — thread mapping, allowlist, quote stripping, loop prevention —
  * is shared with every other transport.
  */
-import { ImapFlow } from 'imapflow';
-import { simpleParser } from 'mailparser';
-import nodemailer from 'nodemailer';
+// Mail transports are only needed once a mailbox actually connects or sends.
+// Loading IMAP, MIME parsing and SMTP at Host startup cost tens of megabytes on
+// every machine that never mounts a mailbox, so each engine is imported at its
+// first use and cached for the life of the process.
+let imapflowModule;
+let mailparserModule;
+let nodemailerModule;
+
+async function loadImapFlow() {
+  imapflowModule ??= import('imapflow');
+  return (await imapflowModule).ImapFlow;
+}
+
+async function parseMail(source) {
+  mailparserModule ??= import('mailparser');
+  return (await mailparserModule).simpleParser(source);
+}
+
+async function createSmtpTransport(options) {
+  nodemailerModule ??= import('nodemailer');
+  const nodemailer = (await nodemailerModule).default ?? nodemailerModule;
+  return nodemailer.createTransport(options);
+}
 
 import {
   MAX_REPLY_CHARS, imapSecurity, normalizeAddress, smtpSecurity,
@@ -37,6 +57,7 @@ export class ImapSmtpTransport {
     if (this.#imap?.usable) return;
     this.#imap?.close();
     this.#imap = null;
+    const ImapFlow = await loadImapFlow();
     const client = new ImapFlow({
       host: this.#config.imapHost,
       port: this.#config.imapPort,
@@ -117,7 +138,7 @@ export class ImapSmtpTransport {
     for (const uid of accepted) {
       const source = await this.#fetchSource(uid);
       if (!source) continue;
-      const parsed = await simpleParser(source);
+      const parsed = await parseMail(source);
       // Carry the UID alongside the parsed mail: it is the polling cursor and
       // is not part of the RFC822 source.
       parsed.uid = uid;
@@ -163,7 +184,7 @@ export class ImapSmtpTransport {
 
   async #transportFor() {
     if (this.#transport) return this.#transport;
-    this.#transport = nodemailer.createTransport({
+    this.#transport = await createSmtpTransport({
       host: this.#config.smtpHost,
       port: this.#config.smtpPort,
       ...smtpSecurity(this.#config.smtpPort, this.#config.smtpSecure),

@@ -185,7 +185,7 @@ The body accepts the required `botId`, `targetId`, and `text` fields, plus optio
 
 The fixed endpoint is `POST /api/dsh-im/delivery/messages`. It reuses the current DSH Host WebServer and does not open another port. Port `3080` is the default for the Web profile; use the address printed by the running Host when it differs.
 
-The HTTP endpoint currently has no authentication and does not provide CORS. Use it only on the local machine or a trusted network; never expose it directly to the public internet.
+The HTTP endpoint does not provide CORS. Without `deliveryHttpToken` it accepts loopback callers only; to call it from another machine, configure `deliveryHttpToken` and send `Authorization: Bearer <token>`. Never expose it directly to the public internet.
 
 ## Send from a plugin in the same Host
 
@@ -396,7 +396,15 @@ The HTTP endpoint is registered only when the current Host provides a WebServer,
     host: '0.0.0.0'
 ```
 
-This also expands network reachability for the other pages and routes on that WebServer. Because the proactive-delivery HTTP endpoint currently has no authentication, use it only with a trusted LAN, firewall, or reverse proxy, and never expose it directly to the public internet.
+This also expands network reachability for the other pages and routes on that WebServer. The proactive-delivery HTTP endpoint still accepts loopback callers only until the profile configures a token:
+
+```yaml
+- id: xmanrui-dsh-im
+  config:
+    deliveryHttpToken: 'replace-with-a-long-random-string'
+```
+
+Once configured, every call (including from this machine) must send `Authorization: Bearer <token>`. Use the token only with a trusted LAN, firewall, or reverse proxy, and never expose the endpoint directly to the public internet.
 
 Connection RPC accepts loopback callers by default. If a Web profile is deliberately served on a trusted LAN, it can reuse the existing Host authority in that profile's `cordis.patch.yml`:
 

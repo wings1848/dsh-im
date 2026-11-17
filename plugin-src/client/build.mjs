@@ -17,7 +17,7 @@ const result = await build({
   target: ['chrome100'],
   external: ['react', 'react-dom'],
   write: false,
-  minify: process.env.NODE_ENV === 'production',
+  minify: process.env.NODE_ENV !== 'development',
   legalComments: 'none',
 });
 const bundled = result.outputFiles?.[0]?.text;

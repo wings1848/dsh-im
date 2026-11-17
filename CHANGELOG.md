@@ -4,6 +4,33 @@
 
 This file records the notable changes in each dsh-im release. Its format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and its versions follow [Semantic Versioning](https://semver.org/).
 
+## [5.10.1-wings.4] - 2026-11-18
+
+### Changed / 同步上游
+
+- 基座从 v5.10.0 更新到上游 `main`（`fc2ceab2`，41 个提交 / 10 个 PR）：每聊天会话导航 `/ls /go /prev /next /drop /title /tail /fork`（#509）、会话列表绑定标记与跨工作区汇总（#526）、IM 会话记录浏览（#534）、会话绑定事件广播（#539）、微信 `/plan` `/goal` 委托（#515）、微信 steer 回执静默（#540）、飞书本地图片与最终答案 Markdown 降级修复（#518 / #399）、客户端工具栏图标对齐（#546）、qrcode 热重载修复（#537）。
+  Rebased onto upstream `main` (`fc2ceab2`, 41 commits / 10 PRs): per-chat Session navigation (`/ls /go /prev /next /drop /title /tail /fork`, #509), bound-Session markers and cross-workspace summaries in the session list (#526), IM Session transcript browsing (#534), binding announcements (#539), Weixin `/plan` `/goal` delegation (#515), silent successful steer receipts (#540), Feishu local-image and final-answer Markdown fallbacks (#518 / #399), client toolbar icon alignment (#546), and the qrcode hot-reload fix (#537).
+
+### Added / 新增
+
+- 新增会话级通知工具 `dsh_im_notify`：任意 DSH 会话（Web、CLI、后台、subagent）都可以通过已接入的 IM 渠道主动发送文字、标题和 1–8 个选项；每条消息自动带「会话短 id · 会话名」标签，Telegram 私聊渲染原生按钮，其他渠道降级为编号文字。
+  Added the session-scoped `dsh_im_notify` tool: any DSH session (Web, CLI, background, subagent) can send text, a title and 1–8 options through a connected IM channel. Every message carries a short session id and name; Telegram private chats render native buttons while other channels fall back to numbered text.
+- 新增默认通知目标：设置页「设为默认通知」保存 `botId + targetId`；工具按「显式 targetId → 默认目标 → 全 Host 唯一目标」解析，歧义、失效和跨 bot 同名都返回可操作错误，不猜测收件人。
+  Added a saved default notification target (`botId + targetId`) with explicit-target → saved-default → single-target resolution; ambiguity, stale targets and cross-bot duplicates return actionable errors instead of guessing a recipient.
+- 投递 HTTP 默认只接受回环调用；配置 `deliveryHttpToken` 后强制 `Authorization: Bearer`，新增 4 条鉴权回归。
+  The delivery HTTP endpoint is loopback-only by default; setting `deliveryHttpToken` requires a Bearer token for every caller.
+
+### Fixed / 修复
+
+- 邮件传输改为首次使用时加载 IMAP/MIME/SMTP，降低未挂载邮箱机器的启动内存。
+- `modern-harness-api` 的会话 cursor 增加 4096 上限并随 agent 释放清理，避免长寿命 Host 无界增长。
+- 客户端构建默认压缩；npm `files` 清单裁剪，README 图片改绝对链接，新增 `verify-docs` 文档校验。
+- 二维码生成统一走上游 `shared/qrcode.mjs`（原生 require），不再保留 fork 的并行懒加载实现。
+
+### Tests / 测试
+
+- 全量 5410 例：5409 通过、1 跳过、0 失败（2026-11-18，Node 26.12.0，`npm test -- --test-concurrency=2`）。
+
 ## [Unreleased]
 
 ### Added / 新增

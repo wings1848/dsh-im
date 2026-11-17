@@ -203,6 +203,8 @@ class MuxSubscription {
   }
 }
 
+const MAX_SESSION_CURSORS = 4096;
+
 class ModernHarnessApi {
   #gateway;
   #peer;
@@ -290,7 +292,10 @@ class ModernHarnessApi {
       }, { global: true }));
       this.#disposers.push(ctx.on('agent/disposed', ({ agent }) => {
         const sessionId = agent?.session?.id;
-        if (typeof sessionId === 'string') this.#assistantStreams.delete(sessionId);
+        if (typeof sessionId === 'string') {
+          this.#assistantStreams.delete(sessionId);
+          this.#sessionCursors.delete(sessionId);
+        }
       }, { global: true }));
       this.#disposers.push(ctx.on(
         'approval/request',
@@ -462,6 +467,14 @@ class ModernHarnessApi {
   #rememberCursor(sessionId, cursor) {
     const previous = this.#sessionCursors.get(sessionId);
     if (previous === undefined || cursor > previous) this.#sessionCursors.set(sessionId, cursor);
+    // A long-lived Host sees every Session it ever streamed; keep the cursor
+    // cache bounded by evicting the oldest insertion instead of growing with
+    // the Session history. Reading an evicted id falls back to a fresh snapshot.
+    while (this.#sessionCursors.size > MAX_SESSION_CURSORS) {
+      const oldest = this.#sessionCursors.keys().next().value;
+      if (oldest === sessionId) break;
+      this.#sessionCursors.delete(oldest);
+    }
   }
 
   #modelCatalog(signal) {
