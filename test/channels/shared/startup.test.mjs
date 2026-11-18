@@ -216,7 +216,9 @@ test('the composed host serves other real channels while Feishu is loading and a
   try {
     // Allow Cordis to enter its activation callback; Feishu stays gated.
     await new Promise(setImmediate);
-    assert.equal(f.routes.size, channels.length + 2);
+    // Channels, the shared sidebar route, the channel-list route and the new
+    // notification target route.
+    assert.equal(f.routes.size, channels.length + 3);
     assert.equal(f.routes.has('/dsh-im-sidebar'), true);
     assert.equal(f.routes.has('/dsh-im-notify'), true);
     await allLoaded.promise;

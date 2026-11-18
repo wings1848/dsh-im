@@ -48,6 +48,7 @@ export default {
   // Telegram 卡片（模型/会话/预设/清空/菜单/帮助/状态/对话工作区/审批折叠）的英文词条。
   '当前会话已归档，无法继续处理。请在 DSH 中取消归档，或发送 /new 创建新会话。': 'The current Session is archived and cannot continue. Unarchive it in DSH, or send /new to create a new Session.',
   '/menu  打开控制台菜单（会话/工作区/模型/预设/状态/帮助）': '/menu  Open the console menu (sessions/workspace/model/preset/status/help)',
+  '打开控制台菜单': 'Open the console menu',
   '用法：\n/sessionlist  列出当前工作区会话\n/sessionlist --limit N  列出当前工作区前 N 个会话（N 为正整数）\n/sessionlist 工作区序号  按 /workspacelist 序号列出会话\n/sessionlist 工作区绝对路径  列出指定工作区会话': 'Usage:\n/sessionlist  List Sessions in the current Workspace\n/sessionlist --limit N  List the first N Sessions in the current Workspace (N must be a positive integer)\n/sessionlist Workspace index  List Sessions by /workspacelist index\n/sessionlist Workspace absolute path  List Sessions in the given Workspace',
   '你可以发送普通消息，但没有执行命令的权限。': 'You can send regular messages, but you do not have permission to run commands.',
   '选择要使用的模型（共 {count} 个，第 {page}/{pages} 页）': 'Choose a model ({count} total, page {page}/{pages})',
