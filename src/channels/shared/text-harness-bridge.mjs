@@ -1770,7 +1770,7 @@ export class TextHarnessBridge {
           { signal: this.#signal, isDirect: message.kind === 'direct' },
         );
         if (result) {
-          await this.#presentSessionNavResult(target, result);
+          await this.#presentSessionNavResult(target, result, message.senderId);
           if (result.askText) {
             const followUp = this.#enqueueMessage(
               {
@@ -2930,7 +2930,7 @@ export class TextHarnessBridge {
    * as-is; a /tail preview may carry a Hide button on button-capable channels;
    * a /tail export is delivered as a document on file-capable channels.
    */
-  async #presentSessionNavResult(target, result) {
+  async #presentSessionNavResult(target, result, senderId) {
     if (result?.document) {
       if (documentSendSupported(this.#descriptor.key, this.#bot)) {
         try {
@@ -2951,7 +2951,7 @@ export class TextHarnessBridge {
       return;
     }
     if (result?.hide === true && buttonPreviewSupported(this.#descriptor.key, this.#bot)) {
-      await this.#sendTailPreviewWithHide(target, result);
+      await this.#sendTailPreviewWithHide(target, result, senderId);
       return;
     }
     for (const reply of result?.messages ?? [result?.message]) {
@@ -2960,7 +2960,7 @@ export class TextHarnessBridge {
   }
 
   /** Send a /tail preview with a single Hide button, falling back to plain text. */
-  async #sendTailPreviewWithHide(target, result) {
+  async #sendTailPreviewWithHide(target, result, senderId) {
     const nonce = createActionNonce(6);
     const markup = {
       inline_keyboard: [[{ text: t('隐藏消息'), callback_data: `${TAIL_HIDE_CALLBACK_PREFIX}${nonce}` }]],
@@ -2981,15 +2981,31 @@ export class TextHarnessBridge {
     const messageId = Array.isArray(sent?.providerMessageIds) && sent.providerMessageIds.length > 0
       ? String(sent.providerMessageIds[0])
       : undefined;
-    if (messageId) this.#tailPreviewMessages.set(nonce, { target, messageId });
+    if (messageId) {
+      this.#tailPreviewMessages.set(nonce, {
+        target,
+        messageId,
+        senderId: String(senderId ?? ''),
+      });
+    }
   }
 
   /** Hide a /tail preview by deleting the bot's own message. Best-effort. */
   async #handleTailHidePress(callback, nonce) {
     const entry = this.#tailPreviewMessages.get(nonce);
-    if (entry) this.#tailPreviewMessages.delete(nonce);
+    if (!entry) {
+      await this.#answerInteractionCallback(callback, t('已隐藏。'));
+      return;
+    }
+    // Only the reader who ran /tail may hide its preview: in a group the button
+    // is visible to everyone, and the delete runs with the bot's own rights.
+    if (entry.senderId && String(callback?.senderId ?? '') !== entry.senderId) {
+      await this.#answerInteractionCallback(callback, t('只有发起 /tail 的人可以隐藏这条消息。'));
+      return;
+    }
+    this.#tailPreviewMessages.delete(nonce);
     await this.#answerInteractionCallback(callback, t('已隐藏。'));
-    if (!entry?.messageId || typeof this.#bot.deleteMessage !== 'function') return;
+    if (!entry.messageId || typeof this.#bot.deleteMessage !== 'function') return;
     try {
       await this.#bot.deleteMessage(entry.target, entry.messageId);
     } catch (error) {

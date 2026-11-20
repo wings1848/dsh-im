@@ -64,6 +64,7 @@ export default {
   '当前渠道不支持发送文件。': 'This channel does not support sending files.',
   '隐藏消息': 'Hide message',
   '已隐藏。': 'Hidden.',
+  '只有发起 /tail 的人可以隐藏这条消息。': 'Only the reader who ran /tail can hide this preview.',
   '列出本聊天使用过的会话（按聊天/话题隔离）': "List this chat's sessions (per chat / per topic)",
   '/ls 或 /list  列出本聊天使用过的会话（● 当前，←/→ 可前后切换，✕ 已失效；列表按聊天隔离，论坛群按话题）':
     '/ls or /list  List this chat\'s sessions (● current, ←/→ navigate, ✕ unavailable; the list is per chat, and per topic in forum groups)',
