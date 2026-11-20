@@ -4,6 +4,25 @@
 
 This file records the notable changes in each dsh-im release. Its format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and its versions follow [Semantic Versioning](https://semver.org/).
 
+## [5.10.1-wings.5] - 2026-11-21
+
+### Added / 新增
+
+- `/status` 新增会话用量三行：上下文占用（近似值 / 模型上限，带百分比）、缓存命中率（缓存读取 / 输入）与累计输入/输出 Token。数据来自 Harness 的 `tokenUsage` 与 `contextPressure` 投影；Host 未上报或读取失败时整行省略，命令不会因此失败。Telegram 状态卡与文本版共用同一格式化函数。
+  `/status` now reports Session usage: context occupancy (approximate / route limit, with percent), cache-hit rate (cached input / input), and accumulated input/output tokens. Values come from Harness's `tokenUsage` and `contextPressure` projections; a Host that does not report them omits the lines instead of failing the command. The Telegram status card and the text reply share one formatter.
+
+### Changed / 行为变更
+
+- 本地命令不再排在长回合后面：`/help`、`/status`、`/display` 以及只读的工作区/会话列表（`/workspace`、`/wsl`、`/sessionlist`、`/conv`、`/session`）在共享文字桥上立即回答；同一聊天有回合在运行时也不会先收到「已排队，等待前序消息处理」。会切换工作区或改写会话绑定的形式（`/workspace <路径或序号>`、`/conv ...`、`/session <会话 ID>`、`/new`、`/compact`）保持原有队列顺序，避免回合进行中被改绑到别的会话或工作区；`/workspace`、`/session` 选择卡在回合进行中按下时同样即时提示「当前任务仍在运行…」，不会绕过队列改绑，回合结束后再按生效。
+  Local commands no longer wait behind a long turn on the shared text bridge: `/help`, `/status`, `/display`, and the read-only workspace/Session listings (`/workspace`, `/wsl`, `/sessionlist`, `/conv`, `/session`) answer immediately while a turn is running, instead of replying “queued” first. Forms that switch the workspace or rewrite the Session binding (`/workspace <path or index>`, `/conv ...`, `/session <session ID>`, `/new`, `/compact`) keep their queue position so an in-flight turn is never rebound mid-flight; the same rule now applies to presses on the `/workspace` and `/session` pickers, which get the “task still running” notice instead of mutating behind the turn.
+
+### Fixed / 修复
+
+- `/tail` 预览的「隐藏消息」按钮只对发起 `/tail` 的人生效：群里其他成员按下只收到提示，不会删掉机器人自己的预览消息。
+  The “Hide message” button on a `/tail` preview now only works for the reader who ran `/tail`; another member of the group gets a notice instead of deleting the bot's preview.
+- 群聊里的 `/conv` 文本输出（未渲染卡片或渠道无键盘时）只显示工作区末段，与卡片一致；私聊仍显示绝对路径。
+  `/conv` text output in a group (no card, or a channel without a keyboard) now shows only the workspace tail, matching its card; private chats keep the absolute path.
+
 ## [5.10.1-wings.4] - 2026-11-18
 
 ### Changed / 同步上游
