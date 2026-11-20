@@ -2227,11 +2227,13 @@ test('/conv command shows, sets, and clears the conversation workspace', async (
 
   const show = await runWorkspaceCommand('/conv', harness, key);
   assert.ok(show.message.includes('当前对话工作区'));
-  assert.ok(show.message.includes(defaultWorkspace));
+  // 群聊只看工作区末段，不暴露绝对路径。
+  assert.ok(show.message.includes('default'), '群聊应显示工作区末段');
+  assert.ok(!show.message.includes(defaultWorkspace), '群聊不显示绝对路径');
   assert.ok(show.message.includes('/conv'), '帮助文案里应显示 /conv');
   // 无参数时应顺带列出现有工作区（带序号），方便直接 /conv <序号> 切换
   assert.ok(show.message.includes('可切换的工作区'), '应列出可切换的工作区');
-  assert.ok(show.message.includes(alternateWorkspace), '列表应包含其他工作区');
+  assert.ok(show.message.includes('alternate workspace'), '列表应包含其他工作区');
   assert.match(show.message, /1\. /, '列表应带序号');
 
   const set = await runWorkspaceCommand('/conv 2', harness, key);

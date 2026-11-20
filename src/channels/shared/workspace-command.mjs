@@ -3,6 +3,7 @@ import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import { t } from './i18n.mjs';
+import { isSharedConversation, workspaceTail } from './status-command.mjs';
 import { WORKSPACE_SESSION_STALE } from './workspace-session.mjs';
 
 const WORKSPACE_COMMAND = /^\/(?:workspace|ws)(?:\s+([\s\S]+))?$/i;
@@ -1014,11 +1015,15 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
     return commandResult(t('当前消息缺少可设置的对话上下文。'));
   }
   const argument = THREAD_WORKSPACE_COMMAND.exec(command)?.[1]?.trim() ?? '';
+  // A group is a room: the text must not print the operator's absolute layout.
+  // The picker card already shows the same tail through `displayCurrent`.
+  const shared = isSharedConversation(conversationKey);
+  const shown = (path) => (shared ? workspaceTail(path) : path);
   if (!argument) {
     try {
       const current = harness.currentConversationWorkspace(conversationKey);
       harness.assertWorkspaceScope?.();
-      const lines = [t('当前对话工作区：{workspace}', { workspace: current })];
+      const lines = [t('当前对话工作区：{workspace}', { workspace: shown(current) })];
       // 明确区分「显式绑定」与「回落 bot 默认」，否则用户无法判断之后改默认值会不会影响本对话。
       const bound = typeof harness?.hasConversationWorkspaceOverride === 'function'
         && harness.hasConversationWorkspaceOverride(conversationKey) === true;
@@ -1032,7 +1037,7 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
         if (paths.length > 0) {
           lines.push('', t('可切换的工作区（{count}）：', { count: paths.length }));
           for (const [index, workspace] of paths.entries()) {
-            lines.push(`${index + 1}. ${workspace}${workspace === current ? t('（当前）') : ''}`);
+            lines.push(`${index + 1}. ${shown(workspace)}${workspace === current ? t('（当前）') : ''}`);
           }
         }
         // `conversationWorkspaceListing` is the machine-readable half a channel may
@@ -1055,7 +1060,7 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
     try {
       const current = await harness.clearConversationWorkspace(conversationKey);
       harness.assertWorkspaceScope?.();
-      return commandResult(t('已清除对话专属工作区，当前使用 bot 默认工作区：{workspace}（之后默认工作区的变化会同步到本对话）', { workspace: current }));
+      return commandResult(t('已清除对话专属工作区，当前使用 bot 默认工作区：{workspace}（之后默认工作区的变化会同步到本对话）', { workspace: shown(current) }));
     } catch (error) {
       if (error?.code === 'workspace-bot-not-found') {
         return commandResult(t('机器人正在移除或已重新接入，无法清除对话工作区。'));
@@ -1078,7 +1083,7 @@ async function runConversationWorkspaceCommand(command, harness, conversationKey
       selected = paths[position - 1];
     }
     const current = await harness.switchConversationWorkspace(conversationKey, selected);
-    return commandResult(t('当前对话工作区已切换为：{workspace}', { workspace: current }));
+    return commandResult(t('当前对话工作区已切换为：{workspace}', { workspace: shown(current) }));
   } catch (error) {
     if (['workspace-not-absolute', 'workspace-not-found', 'workspace-not-directory'].includes(error?.code)) {
       return commandResult(t(`{message}

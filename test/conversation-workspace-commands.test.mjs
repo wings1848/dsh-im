@@ -104,7 +104,14 @@ for (const listingCommand of ['/workspacelist', '/conv', '/ws']) {
       const numbered = listing.message.split('\n').filter((line) => /^\d+\. /u.test(line));
       assert.equal(numbered.length, paths.length);
       for (const [index, path] of paths.entries()) {
-        assert.ok(numbered[index].startsWith(`${index + 1}. ${path}`), listing.message);
+        const tail = path.split(/[\\/]/u).pop();
+        // `/conv` shows a group only the tail; `/ws` and `/workspacelist` still
+        // print the absolute path. Both keep the same numbering order.
+        assert.ok(
+          numbered[index].startsWith(`${index + 1}. ${path}`)
+            || numbered[index].startsWith(`${index + 1}. ${tail}`),
+          listing.message,
+        );
       }
 
       await f.command(`/conv ${position}`);
@@ -217,6 +224,27 @@ test('/conv reports persisted explicit bindings and following the bot default', 
   assert.match((await f.command('/conv')).message, /状态：未显式绑定，当前跟随 bot 默认工作区/u);
 });
 
+test('/conv shows only the workspace tail to a group and the full path in a private chat', async (t) => {
+  const f = await fixture(t);
+  const listing = await f.command('/conv');
+  assert.match(listing.message, /当前对话工作区：default/u);
+  assert.ok(!listing.message.includes(f.defaultWorkspace), 'a group must not learn the absolute path');
+  assert.match(listing.message, /1\. default/u);
+  assert.match(listing.message, /2\. alternate/u);
+
+  const switched = await f.command(`/conv ${f.alternateWorkspace}`);
+  assert.match(switched.message, /当前对话工作区已切换为：alternate/u);
+  assert.ok(!switched.message.includes(f.alternateWorkspace));
+
+  const cleared = await f.command('/conv clear');
+  assert.match(cleared.message, /当前使用 bot 默认工作区：default/u);
+  assert.ok(!cleared.message.includes(f.defaultWorkspace));
+
+  // A private chat keeps the absolute path: only a room needs the tail.
+  const direct = await runWorkspaceCommand('/conv', f.scope.harness, 'direct:chat-1');
+  assert.ok(direct.message.includes(f.defaultWorkspace));
+});
+
 test('/session ID retains existing cross-workspace bot-default behavior', async (t) => {
   const f = await fixture(t);
   await f.state.setSession('group:other', 'session-A');
@@ -234,7 +262,9 @@ test('/conv B after /session A must execute the next task in B, not the bound A 
   await f.command(`/conv ${f.alternateWorkspace}`);
   await f.command('/session session-A');
   const result = await f.command(`/conv ${f.alternateWorkspace}`);
-  assert.ok(result.message.includes(f.alternateWorkspace));
+  const tail = f.alternateWorkspace.split(/[\\/]/u).pop();
+  assert.ok(result.message.includes(tail));
+  assert.ok(!result.message.includes(f.alternateWorkspace), 'a group only sees the workspace tail');
   assert.equal(f.scope.harness.currentConversationWorkspace(f.key), f.alternateWorkspace);
 
   await f.ask();
